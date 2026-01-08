@@ -1,0 +1,5 @@
+{
+  "name": "QR Code Generator Pro",
+  "description": "Мэргэжлийн түвшний QR код үүсгэгч. Вэб сайт болон текстэд зориулсан QR код үүсгэж, татаж авах боломжтой.",
+  "requestFramePermissions": []
+}
