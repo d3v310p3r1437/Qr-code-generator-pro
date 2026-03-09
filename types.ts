@@ -18,6 +18,27 @@ export interface QRConfig {
   cornersStyle: CornerStyle;
 }
 
+export interface UserProfile {
+  id: string;
+  email: string;
+  role: 'admin' | 'user';
+  qr_limit: number;
+}
+
+export interface QRCodeData {
+  id: string;
+  user_id: string;
+  title: string;
+  description: string;
+  target_url: string;
+  config: QRConfig;
+  expires_at: string | null;
+  scan_count: number;
+  created_at: string;
+  type: QRDataType;
+  qr_image_url?: string;
+}
+
 export interface GeneratedHistory {
   id: string;
   url: string;
