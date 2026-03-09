@@ -13,8 +13,13 @@ async function startServer() {
   app.use(express.json());
 
   // Supabase Admin Client (using Service Role Key)
-  const supabaseUrl = process.env.VITE_SUPABASE_URL;
+  const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!supabaseUrl || !serviceRoleKey) {
+    console.warn('⚠️ Supabase URL or Service Role Key is missing in environment variables.');
+    console.warn('Backend API routes requiring admin privileges will fail.');
+  }
 
   const supabaseAdmin = (supabaseUrl && serviceRoleKey) 
     ? createClient(supabaseUrl, serviceRoleKey, {
