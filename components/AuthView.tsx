@@ -28,7 +28,7 @@ export const AuthView: React.FC = () => {
             <LogIn size={32} />
           </div>
           <h1 className="text-3xl font-bold text-slate-900">Нэвтрэх</h1>
-          <p className="text-slate-500 mt-2">QR Code Manager Pro системд тавтай морил</p>
+          {/*<p className="text-slate-500 mt-2">QR Code Manager Pro системд тавтай морил</p>*/}
         </div>
 
         <form onSubmit={handleLogin} className="space-y-4">
