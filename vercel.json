@@ -22,8 +22,7 @@
     },
     {
       "source": "/(.*)",
-      "destination": "/dist/$1",
-      "check": true
+      "destination": "/dist/$1"
     },
     {
       "source": "/(.*)",
