@@ -55,7 +55,7 @@ export const QRDetailsModal: React.FC<QRDetailsModalProps> = ({ qr, onClose }) =
   const processData = () => {
     const counts: Record<string, number> = {};
     analytics.forEach((log: any) => {
-      const date = new Date(log.created_at);
+      const date = new Date(log.scanned_at);
       const key = viewMode === 'day' 
         ? date.toISOString().split('T')[0]
         : `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
@@ -293,6 +293,48 @@ export const QRDetailsModal: React.FC<QRDetailsModalProps> = ({ qr, onClose }) =
                     <p className="text-[11px] text-blue-700 leading-relaxed font-medium">
                       Энэхүү график нь таны QR кодыг хэзээ, хэдэн удаа уншуулсныг харуулна. Та өдөр болон сараар шүүж харах боломжтой.
                     </p>
+                  </div>
+                </div>
+
+                {/* Recent Scans List */}
+                <div className="mt-8">
+                  <h3 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
+                    <Clock className="text-blue-600" size={20} />
+                    Сүүлийн уншилтууд
+                  </h3>
+                  <div className="bg-slate-50 rounded-2xl border border-slate-100 overflow-hidden">
+                    {analytics.length === 0 ? (
+                      <div className="p-8 text-center text-slate-400 text-sm">
+                        Уншилт одоогоор алга.
+                      </div>
+                    ) : (
+                      <div className="max-h-[200px] overflow-y-auto">
+                        <table className="w-full text-left text-xs">
+                          <thead className="sticky top-0 bg-slate-100 text-slate-500 font-bold uppercase tracking-wider">
+                            <tr>
+                              <th className="px-4 py-2">Хэзээ</th>
+                              <th className="px-4 py-2">IP Хаяг</th>
+                              <th className="px-4 py-2">Төхөөрөмж</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {[...analytics].reverse().slice(0, 10).map((log, i) => (
+                              <tr key={i} className="hover:bg-white transition-colors">
+                                <td className="px-4 py-3 text-slate-600 whitespace-nowrap">
+                                  {new Date(log.scanned_at).toLocaleString('mn-MN')}
+                                </td>
+                                <td className="px-4 py-3 text-slate-500 font-mono">
+                                  {log.ip_address || 'Unknown'}
+                                </td>
+                                <td className="px-4 py-3 text-slate-400 truncate max-w-[150px]" title={log.user_agent}>
+                                  {log.user_agent || 'Unknown'}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

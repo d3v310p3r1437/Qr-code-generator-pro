@@ -13,6 +13,9 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = parseInt(process.env.PORT || '3000', 10);
 
+// Trust proxy to get real client IP behind Nginx/Cloud Run
+app.set('trust proxy', true);
+
 // Increase payload limit for large QR logos
 app.use(express.json({ limit: '10mb' }));
 
@@ -288,9 +291,9 @@ apiRouter.get('/qr-codes/:id/analytics', async (req, res) => {
   try {
     const { data, error } = await admin
       .from('scan_logs')
-      .select('created_at')
-      .eq('qr_id', id)
-      .order('created_at', { ascending: true });
+      .select('scanned_at, ip_address, user_agent')
+      .eq('qr_code_id', id)
+      .order('scanned_at', { ascending: true });
     
     if (error) {
       // If table doesn't exist yet, return empty array instead of erroring
@@ -328,21 +331,31 @@ app.get('/r/:id', async (req, res) => {
     }
 
     // Increment scan count and log scan asynchronously
+    const ip = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+    const scanLogData: any = { 
+      qr_code_id: id,
+      ip_address: Array.isArray(ip) ? ip[0] : (typeof ip === 'string' ? ip.split(',')[0].trim() : ip),
+      user_agent: req.headers['user-agent']
+    };
+
     Promise.all([
       admin.from('qr_codes')
         .update({ scan_count: (qr.scan_count || 0) + 1 })
         .eq('id', id),
       admin.from('scan_logs')
-        .insert({ qr_id: id })
+        .insert(scanLogData)
     ]).then(([updateRes, logRes]) => {
       if (updateRes.error) console.error(`[Redirect] Failed to increment scan count for ${id}:`, updateRes.error);
       if (logRes.error) {
         // Silently fail if table doesn't exist, but log it
-        if (!logRes.error.message.includes('relation "scan_logs" does not exist')) {
+        if (logRes.error.code === '42P01' || logRes.error.message.includes('relation "scan_logs" does not exist')) {
+          console.log(`[Redirect] scan_logs table not found, skipping detailed log for ${id}`);
+        } else {
           console.error(`[Redirect] Failed to log scan for ${id}:`, logRes.error);
         }
+      } else {
+        console.log(`[Redirect] Successfully logged scan for QR ${id}`);
       }
-      console.log(`[Redirect] Successfully processed scan for ${id}`);
     });
 
     res.redirect(qr.target_url);

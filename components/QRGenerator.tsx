@@ -213,14 +213,14 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
       
       const qrData = await response.json();
 
-      // 2. Generate the DYNAMIC QR code image blob
-      // The QR code should point to our redirect endpoint for scan tracking
-      const redirectUrl = `${window.location.origin}/r/${qrData.id}`;
+      // 2. Generate the QR code image blob
+      // Only use redirect URL for 'url' type to maintain native functionality for Wi-Fi and Text
+      const qrValue = activeTab === 'url' ? `${window.location.origin}/r/${qrData.id}` : targetUrl;
       
-      // Update the QR instance with the redirect URL before generating the blob
+      // Update the QR instance with the correct value before generating the blob
       if (qrCodeInstance.current) {
         qrCodeInstance.current.update({
-          data: redirectUrl
+          data: qrValue
         });
       }
 
