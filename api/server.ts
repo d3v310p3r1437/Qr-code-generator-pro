@@ -16,6 +16,20 @@ const PORT = parseInt(process.env.PORT || '3000', 10);
 // Trust proxy to get real client IP behind Nginx/Cloud Run
 app.set('trust proxy', true);
 
+// Simple in-memory cache to prevent double-logging from the same IP within a short window
+const recentScans = new Map<string, number>();
+const CLEANUP_INTERVAL = 60000; // 1 minute
+const DEBOUNCE_WINDOW = 2000; // 2 seconds
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, time] of recentScans.entries()) {
+    if (now - time > DEBOUNCE_WINDOW) {
+      recentScans.delete(key);
+    }
+  }
+}, CLEANUP_INTERVAL);
+
 // Increase payload limit for large QR logos
 app.use(express.json({ limit: '10mb' }));
 
@@ -310,6 +324,44 @@ apiRouter.get('/qr-codes/:id/analytics', async (req, res) => {
   }
 });
 
+// Sync Scan Counts with Logs
+apiRouter.post('/admin/sync-counts', async (req, res) => {
+  const admin = getSupabaseAdmin();
+  if (!admin) return res.status(500).json({ error: 'Supabase Admin client not configured' });
+  
+  try {
+    // 1. Get all QR codes
+    const { data: qrCodes, error: qrError } = await admin.from('qr_codes').select('id');
+    if (qrError) throw qrError;
+
+    const results = [];
+    for (const qr of qrCodes) {
+      // 2. Count actual logs
+      const { count, error: countError } = await admin
+        .from('scan_logs')
+        .select('*', { count: 'exact', head: true })
+        .eq('qr_code_id', qr.id);
+      
+      if (countError) {
+        if (countError.code === '42P01') break; // Table doesn't exist
+        continue;
+      }
+
+      // 3. Update scan_count to match logs
+      await admin
+        .from('qr_codes')
+        .update({ scan_count: count || 0 })
+        .eq('id', qr.id);
+      
+      results.push({ id: qr.id, new_count: count });
+    }
+
+    res.json({ success: true, synced: results.length });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Mount API Router
 app.use('/api', apiRouter);
 
@@ -332,31 +384,75 @@ app.get('/r/:id', async (req, res) => {
 
     // Increment scan count and log scan asynchronously
     const ip = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+    const userAgent = req.headers['user-agent'];
+    const purpose = req.headers['purpose'] || req.headers['sec-purpose'];
+    
+    console.log(`[Redirect] Request for QR ${id} from IP ${ip}, Purpose: ${purpose}, UA: ${userAgent}`);
+    
+    // Skip logging for prefetch requests
+    if (purpose === 'prefetch' || purpose === 'preview') {
+      console.log(`[Redirect] Skipping log for prefetch/preview request for QR ${id}`);
+      return res.redirect(qr.target_url);
+    }
+
+    // Debounce: prevent double logging from the same IP within 2 seconds
+    const scanKey = `${ip}-${id}`;
+    const now = Date.now();
+    if (recentScans.has(scanKey)) {
+      const lastScan = recentScans.get(scanKey)!;
+      if (now - lastScan < DEBOUNCE_WINDOW) {
+        console.log(`[Redirect] Skipping duplicate scan for QR ${id} from IP ${ip} (within ${DEBOUNCE_WINDOW}ms)`);
+        return res.redirect(qr.target_url);
+      }
+    }
+    recentScans.set(scanKey, now);
+
     const scanLogData: any = { 
       qr_code_id: id,
       ip_address: Array.isArray(ip) ? ip[0] : (typeof ip === 'string' ? ip.split(',')[0].trim() : ip),
-      user_agent: req.headers['user-agent']
+      user_agent: userAgent
     };
 
-    Promise.all([
-      admin.from('qr_codes')
-        .update({ scan_count: (qr.scan_count || 0) + 1 })
-        .eq('id', id),
-      admin.from('scan_logs')
-        .insert(scanLogData)
-    ]).then(([updateRes, logRes]) => {
-      if (updateRes.error) console.error(`[Redirect] Failed to increment scan count for ${id}:`, updateRes.error);
-      if (logRes.error) {
-        // Silently fail if table doesn't exist, but log it
-        if (logRes.error.code === '42P01' || logRes.error.message.includes('relation "scan_logs" does not exist')) {
-          console.log(`[Redirect] scan_logs table not found, skipping detailed log for ${id}`);
-        } else {
-          console.error(`[Redirect] Failed to log scan for ${id}:`, logRes.error);
-        }
-      } else {
-        console.log(`[Redirect] Successfully logged scan for QR ${id}`);
+    // Use a more reliable way to update count by fetching the latest value
+    // Note: Still not perfectly atomic without RPC, but better than using the stale 'qr' object
+    const updateScanCount = async () => {
+      try {
+        // Fetch current count directly from DB to minimize race condition window
+        const { data: latestQR } = await admin.from('qr_codes').select('scan_count').eq('id', id).single();
+        const currentCount = latestQR?.scan_count || 0;
+        
+        await admin.from('qr_codes')
+          .update({ scan_count: currentCount + 1 })
+          .eq('id', id);
+      } catch (err) {
+        console.error(`[Redirect] Failed to increment scan count for ${id}:`, err);
       }
-    });
+    };
+
+    const logScan = async () => {
+      try {
+        const { error } = await admin.from('scan_logs').insert(scanLogData);
+        if (error) {
+          if (error.code === '42P01' || error.message.includes('relation "scan_logs" does not exist')) {
+            console.log(`[Redirect] scan_logs table not found, skipping detailed log for ${id}`);
+          } else {
+            console.error(`[Redirect] Failed to log scan for ${id}:`, error);
+          }
+        } else {
+          console.log(`[Redirect] Successfully logged scan for QR ${id}`);
+        }
+      } catch (err) {
+        console.error(`[Redirect] Exception logging scan for ${id}:`, err);
+      }
+    };
+
+    // Run updates in background
+    // Use a simple flag on the request object to prevent double-execution if middleware or other factors cause it
+    if (!(req as any)._scanLogged) {
+      (req as any)._scanLogged = true;
+      updateScanCount();
+      logScan();
+    }
 
     res.redirect(qr.target_url);
   } catch (error) {

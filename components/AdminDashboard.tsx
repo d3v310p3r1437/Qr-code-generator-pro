@@ -28,6 +28,7 @@ export const AdminDashboard: React.FC<{ profile: UserProfile }> = ({ profile }) 
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [allQrs, setAllQrs] = useState<(QRCodeData & { profiles: { email: string } })[]>([]);
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
   const [selectedQR, setSelectedQR] = useState<QRCodeData | null>(null);
   
   // Create User Form State
@@ -145,6 +146,22 @@ export const AdminDashboard: React.FC<{ profile: UserProfile }> = ({ profile }) 
     } catch (err) {
       console.error('Download error:', err);
       alert('Зургийг татаж авахад алдаа гарлаа');
+    }
+  };
+
+  const handleSyncCounts = async () => {
+    if (!window.confirm('Бүх QR кодын уншилтын тоог логтой нь тулгаж шинэчлэх үү?')) return;
+    setSyncing(true);
+    try {
+      const response = await fetch('/api/admin/sync-counts', { method: 'POST' });
+      if (!response.ok) throw new Error('Sync failed');
+      const result = await response.json();
+      alert(`${result.synced} QR кодын тоог амжилттай шинэчиллээ.`);
+      fetchData();
+    } catch (err: any) {
+      alert('Алдаа: ' + err.message);
+    } finally {
+      setSyncing(false);
     }
   };
 
@@ -317,9 +334,20 @@ export const AdminDashboard: React.FC<{ profile: UserProfile }> = ({ profile }) 
               <QrCode className="text-blue-600" size={24} />
               Бүх QR Кодууд
             </h2>
-            <span className="bg-slate-100 text-slate-600 px-3 py-1 rounded-full text-xs font-bold">
-              Нийт: {allQrs.length}
-            </span>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={handleSyncCounts}
+                disabled={syncing || loading}
+                className="flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-all disabled:opacity-50"
+                title="Уншилтын тоог логтой тулгаж засах"
+              >
+                {syncing ? <Loader2 className="animate-spin" size={14} /> : <BarChart3 size={14} />}
+                Тоог тулгах (Sync)
+              </button>
+              <span className="bg-slate-100 text-slate-600 px-3 py-1 rounded-full text-xs font-bold">
+                Нийт: {allQrs.length}
+              </span>
+            </div>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
