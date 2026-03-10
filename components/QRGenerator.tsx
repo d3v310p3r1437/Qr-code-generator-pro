@@ -199,9 +199,16 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
         })
       });
 
+      const contentType = response.headers.get('content-type');
       if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.error || 'QR код хадгалж чадсангүй');
+        if (contentType && contentType.includes('application/json')) {
+          const errData = await response.json();
+          throw new Error(errData.error || 'QR код хадгалж чадсангүй');
+        } else {
+          const text = await response.text();
+          console.error('Non-JSON error response:', text);
+          throw new Error(`Серверийн алдаа (${response.status}). Хариулт JSON биш байна.`);
+        }
       }
       
       const qrData = await response.json();

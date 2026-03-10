@@ -13,7 +13,16 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = parseInt(process.env.PORT || '3000', 10);
 
-app.use(express.json());
+// Increase payload limit for large QR logos
+app.use(express.json({ limit: '10mb' }));
+
+// Custom JSON error handler for malformed JSON
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (err instanceof SyntaxError && 'status' in err && err.status === 400 && 'body' in err) {
+    return res.status(400).json({ error: 'Invalid JSON payload' });
+  }
+  next();
+});
 
 // Supabase Admin Client (using Service Role Key)
 let _supabaseAdmin: any = null;
@@ -44,14 +53,16 @@ function getSupabaseAdmin() {
   }
 }
 
+const apiRouter = express.Router();
+
 // API Request Logger
-app.use('/api', (req, res, next) => {
+apiRouter.use((req, res, next) => {
   console.log(`[API] ${req.method} ${req.url}`);
   next();
 });
 
 // Health check endpoint
-app.get('/api/health', async (req, res) => {
+apiRouter.get('/health', async (req, res) => {
   const admin = getSupabaseAdmin();
   let dbStatus = 'not_configured';
   let dbError = null;
@@ -80,7 +91,7 @@ app.get('/api/health', async (req, res) => {
 });
 
 // API Route for Admin to create users
-app.post('/api/admin/create-user', async (req, res) => {
+apiRouter.post('/admin/create-user', async (req, res) => {
   const admin = getSupabaseAdmin();
   if (!admin) {
     return res.status(500).json({ error: 'Supabase Admin client not configured' });
@@ -89,8 +100,6 @@ app.post('/api/admin/create-user', async (req, res) => {
   const { email, password, role, qr_limit } = req.body;
 
   try {
-    const admin = getSupabaseAdmin();
-    if (!admin) throw new Error('Admin client not initialized');
     const { data: authData, error: authError } = await admin.auth.admin.createUser({
       email,
       password,
@@ -119,32 +128,25 @@ app.post('/api/admin/create-user', async (req, res) => {
 });
 
 // Get Profile
-app.get('/api/profile/:id', async (req, res) => {
+apiRouter.get('/profile/:id', async (req, res) => {
   const admin = getSupabaseAdmin();
   if (!admin) {
-    return res.status(500).json({ error: 'Supabase Admin client not configured. Check your environment variables.' });
+    return res.status(500).json({ error: 'Supabase Admin client not configured' });
   }
 
   const { id } = req.params;
 
   try {
-    console.log(`[Profile] Fetching profile for ID: ${id}`);
     let { data, error } = await admin
       .from('profiles')
       .select('*')
       .eq('id', id)
       .single();
 
-    if (error) {
-      console.log(`[Profile] Initial fetch error for ${id}:`, error.message);
-    }
-
     if (error && (error.code === 'PGRST116' || error.message.includes('JSON object'))) {
-      console.log(`[Profile] Profile missing for ${id}, checking Auth...`);
       const { data: { user }, error: authError } = await admin.auth.admin.getUserById(id);
       
       if (!authError && user) {
-        console.log(`[Profile] User found in Auth, creating profile for ${id}...`);
         const { data: newProfile, error: createError } = await admin
           .from('profiles')
           .insert({
@@ -156,32 +158,19 @@ app.get('/api/profile/:id', async (req, res) => {
           .select()
           .single();
         
-        if (!createError) {
-          console.log(`[Profile] Successfully created profile for ${id}`);
-          data = newProfile;
-        } else {
-          console.error(`[Profile] Failed to auto-create profile for ${id}:`, createError.message);
-        }
+        if (!createError) data = newProfile;
       }
     }
 
-    if (!data) {
-      throw new Error(`Profile ${id} not found in database or Auth`);
-    }
-    
+    if (!data) throw new Error(`Profile ${id} not found`);
     res.json(data);
   } catch (error: any) {
-    console.error(`[Profile] Final error for ${id}:`, error.message);
-    res.status(404).json({ 
-      error: error.message || 'Profile not found',
-      code: error.code || 'NOT_FOUND'
-    });
+    res.status(404).json({ error: error.message });
   }
 });
 
-// ... (remaining routes stay the same, but I'll include them for completeness in the chunk)
 // Get All Profiles
-app.get('/api/admin/profiles', async (req, res) => {
+apiRouter.get('/admin/profiles', async (req, res) => {
   const admin = getSupabaseAdmin();
   if (!admin) return res.status(500).json({ error: 'Supabase Admin client not configured' });
   try {
@@ -194,7 +183,7 @@ app.get('/api/admin/profiles', async (req, res) => {
 });
 
 // Get All QR Codes
-app.get('/api/admin/qr-codes', async (req, res) => {
+apiRouter.get('/admin/qr-codes', async (req, res) => {
   const admin = getSupabaseAdmin();
   if (!admin) return res.status(500).json({ error: 'Supabase Admin client not configured' });
   try {
@@ -207,7 +196,7 @@ app.get('/api/admin/qr-codes', async (req, res) => {
 });
 
 // Save QR Code
-app.post('/api/qr-codes', async (req, res) => {
+apiRouter.post('/qr-codes', async (req, res) => {
   const admin = getSupabaseAdmin();
   if (!admin) return res.status(500).json({ error: 'Supabase Admin client not configured' });
   try {
@@ -220,7 +209,7 @@ app.post('/api/qr-codes', async (req, res) => {
 });
 
 // Update QR Code
-app.patch('/api/qr-codes/:id', async (req, res) => {
+apiRouter.patch('/qr-codes/:id', async (req, res) => {
   const admin = getSupabaseAdmin();
   if (!admin) return res.status(500).json({ error: 'Supabase Admin client not configured' });
   const { id } = req.params;
@@ -234,7 +223,7 @@ app.patch('/api/qr-codes/:id', async (req, res) => {
 });
 
 // Delete QR Code
-app.delete('/api/qr-codes/:id', async (req, res) => {
+apiRouter.delete('/qr-codes/:id', async (req, res) => {
   const admin = getSupabaseAdmin();
   if (!admin) return res.status(500).json({ error: 'Supabase Admin client not configured' });
   const { id } = req.params;
@@ -248,7 +237,7 @@ app.delete('/api/qr-codes/:id', async (req, res) => {
 });
 
 // Delete Profile
-app.delete('/api/admin/profiles/:id', async (req, res) => {
+apiRouter.delete('/admin/profiles/:id', async (req, res) => {
   const admin = getSupabaseAdmin();
   if (!admin) return res.status(500).json({ error: 'Supabase Admin client not configured' });
   const { id } = req.params;
@@ -262,7 +251,7 @@ app.delete('/api/admin/profiles/:id', async (req, res) => {
 });
 
 // Get User QR Codes
-app.get('/api/user/qr-codes/:userId', async (req, res) => {
+apiRouter.get('/user/qr-codes/:userId', async (req, res) => {
   const admin = getSupabaseAdmin();
   if (!admin) return res.status(500).json({ error: 'Supabase Admin client not configured' });
   const { userId } = req.params;
@@ -275,7 +264,11 @@ app.get('/api/user/qr-codes/:userId', async (req, res) => {
   }
 });
 
-// QR Redirect
+// Mount API Router
+app.use('/api', apiRouter);
+
+// QR Redirect (outside /api)
+// This handles the short URLs like /r/123
 app.get('/r/:id', async (req, res) => {
   const { id } = req.params;
   const admin = getSupabaseAdmin();
@@ -290,6 +283,17 @@ app.get('/r/:id', async (req, res) => {
     console.error('Redirect error:', error);
     res.status(500).send('Internal server error');
   }
+});
+
+// Global 404 handler for API requests
+app.use((req, res, next) => {
+  if (req.url.startsWith('/api') || req.headers.accept?.includes('application/json')) {
+    return res.status(404).json({ 
+      error: `Not Found: ${req.method} ${req.url}`,
+      suggestion: 'Check if the API route is correctly defined'
+    });
+  }
+  next();
 });
 
 async function setupServer() {
@@ -313,12 +317,16 @@ async function setupServer() {
 
 // Initialize server setup only if NOT on Vercel
 if (!process.env.VERCEL) {
-  setupServer().catch(err => {
+  setupServer().then(() => {
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`Server running on http://localhost:${PORT}`);
+    });
+  }).catch(err => {
     console.error('Failed to setup server:', err);
-  });
-
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    // Still start the server even if Vite fails, so API might work
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`Server running on http://localhost:${PORT} (Vite failed)`);
+    });
   });
 }
 
