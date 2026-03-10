@@ -37,10 +37,31 @@ async function startServer() {
     console.error('❌ Failed to initialize Supabase Admin client:', err);
   }
 
+  // API Request Logger
+  app.use('/api', (req, res, next) => {
+    console.log(`[API] ${req.method} ${req.url}`);
+    next();
+  });
+
   // Health check endpoint to verify environment variables (masked)
-  app.get('/api/health', (req, res) => {
+  app.get('/api/health', async (req, res) => {
+    let dbStatus = 'not_tested';
+    let dbError = null;
+
+    if (supabaseAdmin) {
+      try {
+        const { error } = await supabaseAdmin.from('profiles').select('count', { count: 'exact', head: true });
+        dbStatus = error ? 'error' : 'connected';
+        dbError = error ? error.message : null;
+      } catch (err: any) {
+        dbStatus = 'exception';
+        dbError = err.message;
+      }
+    }
+
     res.json({
       status: 'ok',
+      db: { status: dbStatus, error: dbError },
       config: {
         hasUrl: !!supabaseUrl,
         hasServiceKey: !!serviceRoleKey,
@@ -96,17 +117,28 @@ async function startServer() {
     const { id } = req.params;
 
     try {
+      console.log(`[Profile] Fetching profile for ID: ${id}`);
       let { data, error } = await supabaseAdmin
         .from('profiles')
         .select('*')
         .eq('id', id)
         .single();
 
+      if (error) {
+        console.log(`[Profile] Initial fetch error for ${id}:`, error.message);
+      }
+
       // If profile not found in DB, but user exists in Auth, create it on the fly
       if (error && (error.code === 'PGRST116' || error.message.includes('JSON object'))) {
+        console.log(`[Profile] Profile missing for ${id}, checking Auth...`);
         const { data: { user }, error: authError } = await supabaseAdmin.auth.admin.getUserById(id);
         
+        if (authError) {
+          console.error(`[Profile] Auth lookup failed for ${id}:`, authError.message);
+        }
+
         if (!authError && user) {
+          console.log(`[Profile] User found in Auth, creating profile for ${id}...`);
           const { data: newProfile, error: createError } = await supabaseAdmin
             .from('profiles')
             .insert({
@@ -119,18 +151,27 @@ async function startServer() {
             .single();
           
           if (!createError) {
+            console.log(`[Profile] Successfully created profile for ${id}`);
             data = newProfile;
           } else {
-            console.error('Failed to auto-create profile:', createError);
+            console.error(`[Profile] Failed to auto-create profile for ${id}:`, createError.message);
           }
+        } else {
+          console.warn(`[Profile] User ${id} not found in Auth system either.`);
         }
       }
 
-      if (!data) throw new Error('Profile not found in database');
+      if (!data) {
+        throw new Error(`Profile ${id} not found in database or Auth`);
+      }
+      
       res.json(data);
     } catch (error: any) {
-      console.error('Profile fetch error:', error);
-      res.status(404).json({ error: error.message || 'Profile not found' });
+      console.error(`[Profile] Final error for ${id}:`, error.message);
+      res.status(404).json({ 
+        error: error.message || 'Profile not found',
+        code: error.code || 'NOT_FOUND'
+      });
     }
   });
 

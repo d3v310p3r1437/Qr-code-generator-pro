@@ -78,8 +78,16 @@ const App: React.FC = () => {
       setProfileError(null);
       const response = await fetch(`/api/profile/${userId}`);
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `Server error: ${response.status}`);
+        let errorMsg = `Server error: ${response.status}`;
+        try {
+          const errorData = await response.json();
+          errorMsg = errorData.error || errorMsg;
+          if (errorData.code) errorMsg += ` (${errorData.code})`;
+        } catch (e) {
+          // JSON parsing failed, likely returned HTML (e.g. 404 page)
+          console.error('Failed to parse error JSON:', e);
+        }
+        throw new Error(errorMsg);
       }
       const data = await response.json();
       setProfile(data);
