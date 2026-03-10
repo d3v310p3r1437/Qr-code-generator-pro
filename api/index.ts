@@ -1,6 +1,5 @@
 
 import express from 'express';
-import { createServer as createViteServer } from 'vite';
 import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
 import path from 'path';
@@ -12,33 +11,37 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = 3000;
+const PORT = parseInt(process.env.PORT || '3000', 10);
 
 app.use(express.json());
 
 // Supabase Admin Client (using Service Role Key)
-const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
-const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SERVICE_ROLE_KEY;
+let _supabaseAdmin: any = null;
 
-if (!supabaseUrl || !serviceRoleKey) {
-  console.error('❌ CRITICAL ERROR: Supabase configuration missing!');
-  console.error('URL present:', !!supabaseUrl);
-  console.error('Service Role Key present:', !!serviceRoleKey);
-}
+function getSupabaseAdmin() {
+  if (_supabaseAdmin) return _supabaseAdmin;
 
-let supabaseAdmin: any = null;
-try {
-  if (supabaseUrl && serviceRoleKey) {
-    supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SERVICE_ROLE_KEY;
+
+  if (!supabaseUrl || !serviceRoleKey) {
+    console.error('❌ Supabase configuration missing in getSupabaseAdmin');
+    return null;
+  }
+
+  try {
+    _supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
       auth: {
         autoRefreshToken: false,
         persistSession: false
       }
     });
-    console.log('✅ Supabase Admin client initialized successfully');
+    console.log('✅ Supabase Admin client initialized');
+    return _supabaseAdmin;
+  } catch (err) {
+    console.error('❌ Failed to initialize Supabase Admin client:', err);
+    return null;
   }
-} catch (err) {
-  console.error('❌ Failed to initialize Supabase Admin client:', err);
 }
 
 // API Request Logger
@@ -49,12 +52,13 @@ app.use('/api', (req, res, next) => {
 
 // Health check endpoint
 app.get('/api/health', async (req, res) => {
-  let dbStatus = 'not_tested';
+  const admin = getSupabaseAdmin();
+  let dbStatus = 'not_configured';
   let dbError = null;
 
-  if (supabaseAdmin) {
+  if (admin) {
     try {
-      const { error } = await supabaseAdmin.from('profiles').select('count', { count: 'exact', head: true });
+      const { error } = await admin.from('profiles').select('count', { count: 'exact', head: true });
       dbStatus = error ? 'error' : 'connected';
       dbError = error ? error.message : null;
     } catch (err: any) {
@@ -67,23 +71,27 @@ app.get('/api/health', async (req, res) => {
     status: 'ok',
     db: { status: dbStatus, error: dbError },
     config: {
-      hasUrl: !!supabaseUrl,
-      hasServiceKey: !!serviceRoleKey,
-      nodeEnv: process.env.NODE_ENV
+      hasUrl: !!(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL),
+      hasServiceKey: !!(process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SERVICE_ROLE_KEY),
+      nodeEnv: process.env.NODE_ENV,
+      isVercel: !!process.env.VERCEL
     }
   });
 });
 
 // API Route for Admin to create users
 app.post('/api/admin/create-user', async (req, res) => {
-  if (!supabaseAdmin) {
+  const admin = getSupabaseAdmin();
+  if (!admin) {
     return res.status(500).json({ error: 'Supabase Admin client not configured' });
   }
 
   const { email, password, role, qr_limit } = req.body;
 
   try {
-    const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
+    const admin = getSupabaseAdmin();
+    if (!admin) throw new Error('Admin client not initialized');
+    const { data: authData, error: authError } = await admin.auth.admin.createUser({
       email,
       password,
       email_confirm: true
@@ -92,7 +100,7 @@ app.post('/api/admin/create-user', async (req, res) => {
     if (authError) throw authError;
     if (!authData.user) throw new Error('Failed to create user');
 
-    const { error: profileError } = await supabaseAdmin
+    const { error: profileError } = await admin
       .from('profiles')
       .upsert({
         id: authData.user.id,
@@ -112,7 +120,8 @@ app.post('/api/admin/create-user', async (req, res) => {
 
 // Get Profile
 app.get('/api/profile/:id', async (req, res) => {
-  if (!supabaseAdmin) {
+  const admin = getSupabaseAdmin();
+  if (!admin) {
     return res.status(500).json({ error: 'Supabase Admin client not configured. Check your environment variables.' });
   }
 
@@ -120,7 +129,7 @@ app.get('/api/profile/:id', async (req, res) => {
 
   try {
     console.log(`[Profile] Fetching profile for ID: ${id}`);
-    let { data, error } = await supabaseAdmin
+    let { data, error } = await admin
       .from('profiles')
       .select('*')
       .eq('id', id)
@@ -132,11 +141,11 @@ app.get('/api/profile/:id', async (req, res) => {
 
     if (error && (error.code === 'PGRST116' || error.message.includes('JSON object'))) {
       console.log(`[Profile] Profile missing for ${id}, checking Auth...`);
-      const { data: { user }, error: authError } = await supabaseAdmin.auth.admin.getUserById(id);
+      const { data: { user }, error: authError } = await admin.auth.admin.getUserById(id);
       
       if (!authError && user) {
         console.log(`[Profile] User found in Auth, creating profile for ${id}...`);
-        const { data: newProfile, error: createError } = await supabaseAdmin
+        const { data: newProfile, error: createError } = await admin
           .from('profiles')
           .insert({
             id: user.id,
@@ -173,9 +182,10 @@ app.get('/api/profile/:id', async (req, res) => {
 // ... (remaining routes stay the same, but I'll include them for completeness in the chunk)
 // Get All Profiles
 app.get('/api/admin/profiles', async (req, res) => {
-  if (!supabaseAdmin) return res.status(500).json({ error: 'Supabase Admin client not configured' });
+  const admin = getSupabaseAdmin();
+  if (!admin) return res.status(500).json({ error: 'Supabase Admin client not configured' });
   try {
-    const { data, error } = await supabaseAdmin.from('profiles').select('*').order('created_at', { ascending: false });
+    const { data, error } = await admin.from('profiles').select('*').order('created_at', { ascending: false });
     if (error) throw error;
     res.json(data);
   } catch (error: any) {
@@ -185,9 +195,10 @@ app.get('/api/admin/profiles', async (req, res) => {
 
 // Get All QR Codes
 app.get('/api/admin/qr-codes', async (req, res) => {
-  if (!supabaseAdmin) return res.status(500).json({ error: 'Supabase Admin client not configured' });
+  const admin = getSupabaseAdmin();
+  if (!admin) return res.status(500).json({ error: 'Supabase Admin client not configured' });
   try {
-    const { data, error } = await supabaseAdmin.from('qr_codes').select('*, profiles(email)').order('created_at', { ascending: false });
+    const { data, error } = await admin.from('qr_codes').select('*, profiles(email)').order('created_at', { ascending: false });
     if (error) throw error;
     res.json(data);
   } catch (error: any) {
@@ -197,9 +208,10 @@ app.get('/api/admin/qr-codes', async (req, res) => {
 
 // Save QR Code
 app.post('/api/qr-codes', async (req, res) => {
-  if (!supabaseAdmin) return res.status(500).json({ error: 'Supabase Admin client not configured' });
+  const admin = getSupabaseAdmin();
+  if (!admin) return res.status(500).json({ error: 'Supabase Admin client not configured' });
   try {
-    const { data, error } = await supabaseAdmin.from('qr_codes').insert(req.body).select().single();
+    const { data, error } = await admin.from('qr_codes').insert(req.body).select().single();
     if (error) throw error;
     res.json(data);
   } catch (error: any) {
@@ -209,10 +221,11 @@ app.post('/api/qr-codes', async (req, res) => {
 
 // Update QR Code
 app.patch('/api/qr-codes/:id', async (req, res) => {
-  if (!supabaseAdmin) return res.status(500).json({ error: 'Supabase Admin client not configured' });
+  const admin = getSupabaseAdmin();
+  if (!admin) return res.status(500).json({ error: 'Supabase Admin client not configured' });
   const { id } = req.params;
   try {
-    const { data, error } = await supabaseAdmin.from('qr_codes').update(req.body).eq('id', id).select().single();
+    const { data, error } = await admin.from('qr_codes').update(req.body).eq('id', id).select().single();
     if (error) throw error;
     res.json(data);
   } catch (error: any) {
@@ -222,10 +235,11 @@ app.patch('/api/qr-codes/:id', async (req, res) => {
 
 // Delete QR Code
 app.delete('/api/qr-codes/:id', async (req, res) => {
-  if (!supabaseAdmin) return res.status(500).json({ error: 'Supabase Admin client not configured' });
+  const admin = getSupabaseAdmin();
+  if (!admin) return res.status(500).json({ error: 'Supabase Admin client not configured' });
   const { id } = req.params;
   try {
-    const { error } = await supabaseAdmin.from('qr_codes').delete().eq('id', id);
+    const { error } = await admin.from('qr_codes').delete().eq('id', id);
     if (error) throw error;
     res.json({ success: true });
   } catch (error: any) {
@@ -235,10 +249,11 @@ app.delete('/api/qr-codes/:id', async (req, res) => {
 
 // Delete Profile
 app.delete('/api/admin/profiles/:id', async (req, res) => {
-  if (!supabaseAdmin) return res.status(500).json({ error: 'Supabase Admin client not configured' });
+  const admin = getSupabaseAdmin();
+  if (!admin) return res.status(500).json({ error: 'Supabase Admin client not configured' });
   const { id } = req.params;
   try {
-    const { error } = await supabaseAdmin.from('profiles').delete().eq('id', id);
+    const { error } = await admin.from('profiles').delete().eq('id', id);
     if (error) throw error;
     res.json({ success: true });
   } catch (error: any) {
@@ -248,10 +263,11 @@ app.delete('/api/admin/profiles/:id', async (req, res) => {
 
 // Get User QR Codes
 app.get('/api/user/qr-codes/:userId', async (req, res) => {
-  if (!supabaseAdmin) return res.status(500).json({ error: 'Supabase Admin client not configured' });
+  const admin = getSupabaseAdmin();
+  if (!admin) return res.status(500).json({ error: 'Supabase Admin client not configured' });
   const { userId } = req.params;
   try {
-    const { data, error } = await supabaseAdmin.from('qr_codes').select('*').eq('user_id', userId).order('created_at', { ascending: false });
+    const { data, error } = await admin.from('qr_codes').select('*').eq('user_id', userId).order('created_at', { ascending: false });
     if (error) throw error;
     res.json(data);
   } catch (error: any) {
@@ -262,12 +278,13 @@ app.get('/api/user/qr-codes/:userId', async (req, res) => {
 // QR Redirect
 app.get('/r/:id', async (req, res) => {
   const { id } = req.params;
-  if (!supabaseAdmin) return res.status(500).send('Server configuration error');
+  const admin = getSupabaseAdmin();
+  if (!admin) return res.status(500).send('Server configuration error');
   try {
-    const { data: qr, error: fetchError } = await supabaseAdmin.from('qr_codes').select('*').eq('id', id).single();
+    const { data: qr, error: fetchError } = await admin.from('qr_codes').select('*').eq('id', id).single();
     if (fetchError || !qr) return res.status(404).send('QR code not found');
     if (qr.expires_at && new Date(qr.expires_at) < new Date()) return res.status(410).send('QR code has expired');
-    await supabaseAdmin.from('qr_codes').update({ scan_count: (qr.scan_count || 0) + 1 }).eq('id', id);
+    await admin.from('qr_codes').update({ scan_count: (qr.scan_count || 0) + 1 }).eq('id', id);
     res.redirect(qr.target_url);
   } catch (error) {
     console.error('Redirect error:', error);
@@ -275,28 +292,34 @@ app.get('/r/:id', async (req, res) => {
   }
 });
 
-async function startServer() {
-  if (process.env.NODE_ENV !== 'production') {
+async function setupServer() {
+  if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
+    // Dynamic import vite only in dev to avoid production dependency issues
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
     });
     app.use(vite.middlewares);
-  } else {
-    const distPath = path.resolve(__dirname, 'dist');
+  } else if (!process.env.VERCEL) {
+    // Only serve static files if NOT on Vercel (Vercel handles this via vercel.json)
+    const distPath = path.resolve(__dirname, '..', 'dist');
     app.use(express.static(distPath));
     app.get('*', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
+}
+
+// Initialize server setup only if NOT on Vercel
+if (!process.env.VERCEL) {
+  setupServer().catch(err => {
+    console.error('Failed to setup server:', err);
+  });
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
-}
-
-if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
-  startServer();
 }
 
 export default app;
