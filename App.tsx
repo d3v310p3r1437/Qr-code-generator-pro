@@ -21,6 +21,7 @@ import {
 const App: React.FC = () => {
   const [session, setSession] = useState<any>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [profileError, setProfileError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [configError, setConfigError] = useState<string | null>(null);
   const [view, setView] = useState<'dashboard' | 'generator'>('dashboard');
@@ -28,47 +29,63 @@ const App: React.FC = () => {
   const location = useLocation();
 
   useEffect(() => {
-    try {
-      // 1. Listen for Auth changes
-      supabase.auth.getSession().then(({ data: { session } }: { data: { session: any } }) => {
+    let mounted = true;
+
+    const initAuth = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!mounted) return;
+        
         setSession(session);
-        if (session) fetchProfile(session.user.id);
-        else setLoading(false);
-      }).catch((err: any) => {
-        if (err.message.includes('Settings')) {
-          setConfigError(err.message);
+        if (session) {
+          await fetchProfile(session.user.id);
+        } else {
           setLoading(false);
         }
-      });
-
-      const { data: { subscription } } = supabase.auth.onAuthStateChange((_event: string, session: any) => {
-        setSession(session);
-        if (session) fetchProfile(session.user.id);
-        else {
-          setProfile(null);
+      } catch (err: any) {
+        if (mounted) {
+          if (err.message.includes('Settings')) setConfigError(err.message);
           setLoading(false);
         }
-      });
-
-      return () => subscription.unsubscribe();
-    } catch (err: any) {
-      if (err.message.includes('Settings')) {
-        setConfigError(err.message);
-        setLoading(false);
-      } else {
-        console.error(err);
       }
-    }
+    };
+
+    initAuth();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event: string, session: any) => {
+      if (!mounted) return;
+      
+      setSession(session);
+      if (session) {
+        // Only set loading to true if we don't have a profile yet or it's a different user
+        setLoading(true);
+        await fetchProfile(session.user.id);
+      } else {
+        setProfile(null);
+        setProfileError(null);
+        setLoading(false);
+      }
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const fetchProfile = async (userId: string) => {
     try {
+      setProfileError(null);
       const response = await fetch(`/api/profile/${userId}`);
-      if (!response.ok) throw new Error('Profile not found');
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Server error: ${response.status}`);
+      }
       const data = await response.json();
       setProfile(data);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error fetching profile:', error);
+      setProfileError(error.message);
       setProfile(null);
     } finally {
       setLoading(false);
@@ -131,7 +148,13 @@ const App: React.FC = () => {
       <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4 text-center">
         <Shield className="text-red-500 mb-4" size={48} />
         <h1 className="text-2xl font-bold text-slate-900 mb-2">Хандах эрхгүй</h1>
-        <p className="text-slate-500 mb-6">Таны профайл мэдээлэл олдсонгүй. Админтай холбогдоно уу.</p>
+        <p className="text-slate-500 mb-2">Таны профайл мэдээлэл олдсонгүй.</p>
+        {profileError && (
+          <div className="bg-red-50 text-red-600 p-3 rounded-xl text-xs font-mono mb-6 max-w-md">
+            Error: {profileError}
+          </div>
+        )}
+        <p className="text-slate-400 text-sm mb-6">Админтай холбогдож бүртгэлээ шалгуулна уу.</p>
         <button onClick={handleLogout} className="text-blue-600 font-bold hover:underline">Гарах</button>
       </div>
     );

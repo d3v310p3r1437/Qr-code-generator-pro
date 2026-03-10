@@ -14,21 +14,40 @@ async function startServer() {
 
   // Supabase Admin Client (using Service Role Key)
   const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SERVICE_ROLE_KEY;
 
   if (!supabaseUrl || !serviceRoleKey) {
-    console.warn('⚠️ Supabase URL or Service Role Key is missing in environment variables.');
-    console.warn('Backend API routes requiring admin privileges will fail.');
+    console.error('❌ CRITICAL ERROR: Supabase configuration missing!');
+    console.error('URL present:', !!supabaseUrl);
+    console.error('Service Role Key present:', !!serviceRoleKey);
   }
 
-  const supabaseAdmin = (supabaseUrl && serviceRoleKey) 
-    ? createClient(supabaseUrl, serviceRoleKey, {
+  let supabaseAdmin: any = null;
+  try {
+    if (supabaseUrl && serviceRoleKey) {
+      supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
         auth: {
           autoRefreshToken: false,
           persistSession: false
         }
-      })
-    : null;
+      });
+      console.log('✅ Supabase Admin client initialized successfully');
+    }
+  } catch (err) {
+    console.error('❌ Failed to initialize Supabase Admin client:', err);
+  }
+
+  // Health check endpoint to verify environment variables (masked)
+  app.get('/api/health', (req, res) => {
+    res.json({
+      status: 'ok',
+      config: {
+        hasUrl: !!supabaseUrl,
+        hasServiceKey: !!serviceRoleKey,
+        nodeEnv: process.env.NODE_ENV
+      }
+    });
+  });
 
   // API Route for Admin to create users without session swap
   app.post('/api/admin/create-user', async (req, res) => {
@@ -71,22 +90,47 @@ async function startServer() {
   // Get Profile (using admin client to bypass RLS)
   app.get('/api/profile/:id', async (req, res) => {
     if (!supabaseAdmin) {
-      return res.status(500).json({ error: 'Supabase Admin client not configured' });
+      return res.status(500).json({ error: 'Supabase Admin client not configured. Check your environment variables.' });
     }
 
     const { id } = req.params;
 
     try {
-      const { data, error } = await supabaseAdmin
+      let { data, error } = await supabaseAdmin
         .from('profiles')
         .select('*')
         .eq('id', id)
         .single();
 
-      if (error) throw error;
+      // If profile not found in DB, but user exists in Auth, create it on the fly
+      if (error && (error.code === 'PGRST116' || error.message.includes('JSON object'))) {
+        const { data: { user }, error: authError } = await supabaseAdmin.auth.admin.getUserById(id);
+        
+        if (!authError && user) {
+          const { data: newProfile, error: createError } = await supabaseAdmin
+            .from('profiles')
+            .insert({
+              id: user.id,
+              email: user.email,
+              role: 'user',
+              qr_limit: 10
+            })
+            .select()
+            .single();
+          
+          if (!createError) {
+            data = newProfile;
+          } else {
+            console.error('Failed to auto-create profile:', createError);
+          }
+        }
+      }
+
+      if (!data) throw new Error('Profile not found in database');
       res.json(data);
     } catch (error: any) {
-      res.status(404).json({ error: 'Profile not found' });
+      console.error('Profile fetch error:', error);
+      res.status(404).json({ error: error.message || 'Profile not found' });
     }
   });
 
