@@ -23,6 +23,7 @@ export interface UserProfile {
   email: string;
   role: 'admin' | 'user';
   qr_limit: number;
+  qr_count?: number;
 }
 
 export interface QRCodeData {

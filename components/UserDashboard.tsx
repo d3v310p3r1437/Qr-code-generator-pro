@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../services/supabaseClient';
 import { QRCodeData, UserProfile } from '../types';
+import { QRDetailsModal } from './QRDetailsModal';
 import { 
   Plus, 
   Trash2, 
@@ -25,6 +26,7 @@ interface UserDashboardProps {
 export const UserDashboard: React.FC<UserDashboardProps> = ({ profile, onNewQR }) => {
   const [qrs, setQrs] = useState<QRCodeData[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedQR, setSelectedQR] = useState<QRCodeData | null>(null);
 
   const fetchQRs = async () => {
     setLoading(true);
@@ -147,7 +149,11 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({ profile, onNewQR }
           {qrs.map((qr) => {
             const expired = isExpired(qr.expires_at);
             return (
-              <div key={qr.id} className="bg-white rounded-[32px] border border-slate-100 shadow-sm hover:shadow-md transition-all overflow-hidden flex flex-col">
+              <div 
+                key={qr.id} 
+                className="bg-white rounded-[32px] border border-slate-100 shadow-sm hover:shadow-md transition-all overflow-hidden flex flex-col cursor-pointer"
+                onClick={() => setSelectedQR(qr)}
+              >
                 <div className="p-6 flex-1">
                   <div className="flex items-start justify-between mb-4">
                     <div className={`px-3 py-1 rounded-full text-[10px] font-black uppercase flex items-center gap-1.5 ${expired ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>
@@ -155,7 +161,10 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({ profile, onNewQR }
                       {expired ? 'Хугацаа дууссан' : 'Идэвхтэй'}
                     </div>
                     <button 
-                      onClick={() => handleDelete(qr.id, qr.qr_image_url)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDelete(qr.id, qr.qr_image_url);
+                      }}
                       className="text-slate-300 hover:text-red-500 transition-colors p-1"
                     >
                       <Trash2 size={18} />
@@ -198,7 +207,7 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({ profile, onNewQR }
                     </div>
                   </div>
                 </div>
-                <div className="bg-slate-50 p-4 flex items-center justify-between gap-2">
+                <div className="bg-slate-50 p-4 flex items-center justify-between gap-2" onClick={(e) => e.stopPropagation()}>
                   <div className="flex items-center gap-2 text-[10px] font-bold text-slate-400 uppercase truncate max-w-[150px]" title={qr.target_url}>
                     <QrCode size={12} /> {qr.target_url}
                   </div>
@@ -237,6 +246,13 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({ profile, onNewQR }
             );
           })}
         </div>
+      )}
+
+      {selectedQR && (
+        <QRDetailsModal 
+          qr={selectedQR} 
+          onClose={() => setSelectedQR(null)} 
+        />
       )}
     </div>
   );

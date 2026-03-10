@@ -169,14 +169,30 @@ apiRouter.get('/profile/:id', async (req, res) => {
   }
 });
 
-// Get All Profiles
+// Get All Profiles with QR counts
 apiRouter.get('/admin/profiles', async (req, res) => {
   const admin = getSupabaseAdmin();
   if (!admin) return res.status(500).json({ error: 'Supabase Admin client not configured' });
   try {
-    const { data, error } = await admin.from('profiles').select('*').order('created_at', { ascending: false });
-    if (error) throw error;
-    res.json(data);
+    // Fetch profiles
+    const { data: profiles, error: profileError } = await admin.from('profiles').select('*').order('created_at', { ascending: false });
+    if (profileError) throw profileError;
+
+    // Fetch QR counts for each user
+    const { data: qrCounts, error: qrError } = await admin.from('qr_codes').select('user_id');
+    if (qrError) throw qrError;
+
+    const countsMap: Record<string, number> = {};
+    qrCounts.forEach((qr: any) => {
+      countsMap[qr.user_id] = (countsMap[qr.user_id] || 0) + 1;
+    });
+
+    const profilesWithCounts = profiles.map((p: any) => ({
+      ...p,
+      qr_count: countsMap[p.id] || 0
+    }));
+
+    res.json(profilesWithCounts);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -264,6 +280,31 @@ apiRouter.get('/user/qr-codes/:userId', async (req, res) => {
   }
 });
 
+// Get Analytics for a QR Code
+apiRouter.get('/qr-codes/:id/analytics', async (req, res) => {
+  const admin = getSupabaseAdmin();
+  if (!admin) return res.status(500).json({ error: 'Supabase Admin client not configured' });
+  const { id } = req.params;
+  try {
+    const { data, error } = await admin
+      .from('scan_logs')
+      .select('created_at')
+      .eq('qr_id', id)
+      .order('created_at', { ascending: true });
+    
+    if (error) {
+      // If table doesn't exist yet, return empty array instead of erroring
+      if (error.code === 'PGRST116' || error.message.includes('relation "scan_logs" does not exist')) {
+        return res.json([]);
+      }
+      throw error;
+    }
+    res.json(data);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Mount API Router
 app.use('/api', apiRouter);
 
@@ -284,14 +325,23 @@ app.get('/r/:id', async (req, res) => {
       return res.status(410).send('QR code has expired');
     }
 
-    // Increment scan count asynchronously to not block the redirect
-    admin.from('qr_codes')
-      .update({ scan_count: (qr.scan_count || 0) + 1 })
-      .eq('id', id)
-      .then(({ error: updateError }: { error: any }) => {
-        if (updateError) console.error(`[Redirect] Failed to increment scan count for ${id}:`, updateError);
-        else console.log(`[Redirect] Successfully incremented scan count for ${id}`);
-      });
+    // Increment scan count and log scan asynchronously
+    Promise.all([
+      admin.from('qr_codes')
+        .update({ scan_count: (qr.scan_count || 0) + 1 })
+        .eq('id', id),
+      admin.from('scan_logs')
+        .insert({ qr_id: id })
+    ]).then(([updateRes, logRes]) => {
+      if (updateRes.error) console.error(`[Redirect] Failed to increment scan count for ${id}:`, updateRes.error);
+      if (logRes.error) {
+        // Silently fail if table doesn't exist, but log it
+        if (!logRes.error.message.includes('relation "scan_logs" does not exist')) {
+          console.error(`[Redirect] Failed to log scan for ${id}:`, logRes.error);
+        }
+      }
+      console.log(`[Redirect] Successfully processed scan for ${id}`);
+    });
 
     res.redirect(qr.target_url);
   } catch (error) {

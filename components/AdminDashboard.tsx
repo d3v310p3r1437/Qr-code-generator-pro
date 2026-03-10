@@ -21,12 +21,14 @@ import {
 } from 'lucide-react';
 import { UserProfile, QRCodeData } from '../types';
 import { QRGenerator } from './QRGenerator';
+import { QRDetailsModal } from './QRDetailsModal';
 
 export const AdminDashboard: React.FC<{ profile: UserProfile }> = ({ profile }) => {
   const [activeTab, setActiveTab] = useState<'users' | 'qrs' | 'create'>('qrs');
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [allQrs, setAllQrs] = useState<(QRCodeData & { profiles: { email: string } })[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedQR, setSelectedQR] = useState<QRCodeData | null>(null);
   
   // Create User Form State
   const [email, setEmail] = useState('');
@@ -274,7 +276,21 @@ export const AdminDashboard: React.FC<{ profile: UserProfile }> = ({ profile }) 
                           </span>
                         </td>
                         <td className="px-6 py-4 font-mono text-sm text-slate-500">
-                          {u.role === 'admin' ? <span className="text-purple-600 font-bold">Хязгааргүй</span> : u.qr_limit}
+                          {u.role === 'admin' ? (
+                            <span className="text-purple-600 font-bold">Хязгааргүй</span>
+                          ) : (
+                            <div className="flex items-center gap-2">
+                              <span className={`font-bold ${u.qr_count && u.qr_count >= u.qr_limit ? 'text-red-500' : 'text-slate-700'}`}>
+                                {u.qr_count || 0} / {u.qr_limit}
+                              </span>
+                              <div className="w-16 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                <div 
+                                  className={`h-full rounded-full ${u.qr_count && u.qr_count >= u.qr_limit ? 'bg-red-500' : 'bg-blue-500'}`}
+                                  style={{ width: `${Math.min(100, ((u.qr_count || 0) / u.qr_limit) * 100)}%` }}
+                                />
+                              </div>
+                            </div>
+                          )}
                         </td>
                         <td className="px-6 py-4 text-right">
                           <button 
@@ -323,7 +339,11 @@ export const AdminDashboard: React.FC<{ profile: UserProfile }> = ({ profile }) 
                   <tr><td colSpan={5} className="px-6 py-12 text-center text-slate-400">QR код олдсонгүй.</td></tr>
                 ) : (
                   allQrs.map((qr) => (
-                    <tr key={qr.id} className="hover:bg-slate-50/50 transition-colors">
+                    <tr 
+                      key={qr.id} 
+                      className="hover:bg-slate-50/50 transition-colors cursor-pointer"
+                      onClick={() => setSelectedQR(qr)}
+                    >
                       <td className="px-6 py-4">
                         {qr.qr_image_url ? (
                           <img src={qr.qr_image_url} alt="" className="w-10 h-10 rounded-lg border border-slate-100 object-contain" referrerPolicy="no-referrer" />
@@ -361,7 +381,7 @@ export const AdminDashboard: React.FC<{ profile: UserProfile }> = ({ profile }) 
                         </div>
                       </td>
                       <td className="px-6 py-4 text-right">
-                        <div className="flex items-center justify-end gap-2">
+                        <div className="flex items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
                           {qr.qr_image_url && (
                             <button 
                               onClick={() => handleDownload(qr.qr_image_url!, qr.title)}
@@ -397,6 +417,13 @@ export const AdminDashboard: React.FC<{ profile: UserProfile }> = ({ profile }) 
           user={profile} 
           onBack={() => setActiveTab('qrs')} 
           onSaved={() => setActiveTab('qrs')} 
+        />
+      )}
+
+      {selectedQR && (
+        <QRDetailsModal 
+          qr={selectedQR} 
+          onClose={() => setSelectedQR(null)} 
         />
       )}
     </div>
