@@ -53,22 +53,6 @@ export const QRDetailsModal: React.FC<QRDetailsModalProps> = ({ qr, onClose }) =
   }, [qr.id]);
 
   const processData = () => {
-    if (analytics.length === 0) {
-      // Return some mock data if no real data exists yet, so the user can see the chart
-      const mockData = [];
-      const now = new Date();
-      for (let i = 6; i >= 0; i--) {
-        const d = new Date();
-        d.setDate(now.getDate() - i);
-        mockData.push({
-          date: d.toLocaleDateString('mn-MN', { month: 'short', day: 'numeric' }),
-          fullDate: d.toISOString().split('T')[0],
-          count: Math.floor(Math.random() * 10) + (i === 0 ? qr.scan_count || 0 : 0)
-        });
-      }
-      return mockData;
-    }
-
     const counts: Record<string, number> = {};
     analytics.forEach((log: any) => {
       const date = new Date(log.created_at);
@@ -95,9 +79,11 @@ export const QRDetailsModal: React.FC<QRDetailsModalProps> = ({ qr, onClose }) =
       for (let i = 5; i >= 0; i--) {
         const d = new Date();
         d.setMonth(now.getMonth() - i);
-        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const key = `${year}-${month}`;
         data.push({
-          date: d.toLocaleDateString('mn-MN', { year: 'numeric', month: 'short' }),
+          date: key, // Format: 2026-03
           count: counts[key] || 0
         });
       }

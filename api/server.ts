@@ -294,7 +294,9 @@ apiRouter.get('/qr-codes/:id/analytics', async (req, res) => {
     
     if (error) {
       // If table doesn't exist yet, return empty array instead of erroring
-      if (error.code === 'PGRST116' || error.message.includes('relation "scan_logs" does not exist')) {
+      // 42P01 is the standard Postgres error for "relation does not exist"
+      if (error.code === '42P01' || error.code === 'PGRST116' || error.message.includes('relation "scan_logs" does not exist')) {
+        console.log(`[API] scan_logs table not found for QR ${id}, returning empty analytics`);
         return res.json([]);
       }
       throw error;
