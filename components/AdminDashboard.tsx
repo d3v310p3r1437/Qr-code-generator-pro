@@ -16,7 +16,8 @@ import {
   User as UserIcon,
   BarChart3,
   Calendar,
-  Copy
+  Copy,
+  Download
 } from 'lucide-react';
 import { UserProfile, QRCodeData } from '../types';
 import { QRGenerator } from './QRGenerator';
@@ -124,6 +125,24 @@ export const AdminDashboard: React.FC<{ profile: UserProfile }> = ({ profile }) 
       fetchData();
     } catch (err: any) {
       alert('Алдаа: ' + err.message);
+    }
+  };
+
+  const handleDownload = async (url: string, title: string) => {
+    try {
+      const response = await fetch(url);
+      const blob = await response.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = `${title || 'qr-code'}.png`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (err) {
+      console.error('Download error:', err);
+      alert('Зургийг татаж авахад алдаа гарлаа');
     }
   };
 
@@ -343,12 +362,22 @@ export const AdminDashboard: React.FC<{ profile: UserProfile }> = ({ profile }) 
                       </td>
                       <td className="px-6 py-4 text-right">
                         <div className="flex items-center justify-end gap-2">
-                          <a href={qr.target_url} target="_blank" rel="noreferrer" className="p-2 text-slate-400 hover:text-blue-600 transition-colors">
+                          {qr.qr_image_url && (
+                            <button 
+                              onClick={() => handleDownload(qr.qr_image_url!, qr.title)}
+                              className="p-2 text-slate-400 hover:text-blue-600 transition-colors"
+                              title="Татах"
+                            >
+                              <Download size={18} />
+                            </button>
+                          )}
+                          <a href={qr.target_url} target="_blank" rel="noreferrer" className="p-2 text-slate-400 hover:text-blue-600 transition-colors" title="Нээх">
                             <ExternalLink size={18} />
                           </a>
                           <button 
                             onClick={() => handleDeleteQR(qr.id, qr.qr_image_url)}
                             className="p-2 text-slate-400 hover:text-red-500 transition-colors"
+                            title="Устгах"
                           >
                             <Trash2 size={18} />
                           </button>

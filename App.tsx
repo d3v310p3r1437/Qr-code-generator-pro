@@ -52,14 +52,19 @@ const App: React.FC = () => {
 
     initAuth();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event: string, session: any) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event: string, session: any) => {
       if (!mounted) return;
       
       setSession(session);
       if (session) {
-        // Only set loading to true if we don't have a profile yet or it's a different user
-        setLoading(true);
-        await fetchProfile(session.user.id);
+        // Only set loading to true if we don't have a profile yet
+        if (!profile) {
+          setLoading(true);
+          await fetchProfile(session.user.id);
+        } else if (event === 'SIGNED_IN') {
+          // Refresh profile on explicit sign in
+          await fetchProfile(session.user.id);
+        }
       } else {
         setProfile(null);
         setProfileError(null);

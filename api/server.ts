@@ -275,9 +275,24 @@ app.get('/r/:id', async (req, res) => {
   if (!admin) return res.status(500).send('Server configuration error');
   try {
     const { data: qr, error: fetchError } = await admin.from('qr_codes').select('*').eq('id', id).single();
-    if (fetchError || !qr) return res.status(404).send('QR code not found');
-    if (qr.expires_at && new Date(qr.expires_at) < new Date()) return res.status(410).send('QR code has expired');
-    await admin.from('qr_codes').update({ scan_count: (qr.scan_count || 0) + 1 }).eq('id', id);
+    if (fetchError || !qr) {
+      console.error(`[Redirect] QR code ${id} not found:`, fetchError);
+      return res.status(404).send('QR code not found');
+    }
+    
+    if (qr.expires_at && new Date(qr.expires_at) < new Date()) {
+      return res.status(410).send('QR code has expired');
+    }
+
+    // Increment scan count asynchronously to not block the redirect
+    admin.from('qr_codes')
+      .update({ scan_count: (qr.scan_count || 0) + 1 })
+      .eq('id', id)
+      .then(({ error: updateError }: { error: any }) => {
+        if (updateError) console.error(`[Redirect] Failed to increment scan count for ${id}:`, updateError);
+        else console.log(`[Redirect] Successfully incremented scan count for ${id}`);
+      });
+
     res.redirect(qr.target_url);
   } catch (error) {
     console.error('Redirect error:', error);
