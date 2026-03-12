@@ -15,7 +15,9 @@ import {
   User as UserIcon,
   Shield,
   Loader2,
-  QrCode
+  QrCode,
+  AlertTriangle,
+  Home
 } from 'lucide-react';
 
 const App: React.FC = () => {
@@ -136,6 +138,32 @@ const App: React.FC = () => {
             <li><code>VITE_SUPABASE_URL</code> болон <code>VITE_SUPABASE_ANON_KEY</code> утгуудыг нэмнэ.</li>
             <li>Хадгалаад хуудсаа дахин ачаална.</li>
           </ol>
+        </div>
+      </div>
+    );
+  }
+
+  if (location.pathname === '/qr-error') {
+    const searchParams = new URLSearchParams(location.search);
+    const type = searchParams.get('type');
+    let message = 'Алдаа гарлаа.';
+    if (type === 'not_found') message = 'QR код олдсонгүй.';
+    if (type === 'expired') message = 'Энэхүү QR кодын хүчинтэй хугацаа дууссан байна.';
+    
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-white rounded-[32px] shadow-xl p-8 border border-slate-100 text-center">
+          <div className="inline-flex items-center justify-center p-4 bg-red-50 text-red-600 rounded-full mb-6">
+            <AlertTriangle size={48} />
+          </div>
+          <h1 className="text-2xl font-bold text-slate-900 mb-4">Уучлаарай</h1>
+          <p className="text-slate-600 mb-8 leading-relaxed">{message}</p>
+          <button
+            onClick={() => window.location.href = '/'}
+            className="inline-flex items-center gap-2 text-blue-600 font-bold hover:underline"
+          >
+            <Home size={18} /> Нүүр хуудас руу буцах
+          </button>
         </div>
       </div>
     );
