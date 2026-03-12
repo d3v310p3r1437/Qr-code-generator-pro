@@ -367,7 +367,7 @@ app.use('/api', apiRouter);
 
 // QR Redirect (outside /api)
 // This handles the short URLs like /r/123
-app.get('/r/:id', async (req, res) => {
+app.get('/r/:id', async (req, res, next) => {
   const { id } = req.params;
   const admin = getSupabaseAdmin();
   if (!admin) return res.status(500).send('Server configuration error');
@@ -375,11 +375,11 @@ app.get('/r/:id', async (req, res) => {
     const { data: qr, error: fetchError } = await admin.from('qr_codes').select('*').eq('id', id).single();
     if (fetchError || !qr) {
       console.error(`[Redirect] QR code ${id} not found:`, fetchError);
-      return res.status(404).send('QR code not found');
+      return next();
     }
     
     if (qr.expires_at && new Date(qr.expires_at) < new Date()) {
-      return res.status(410).send('QR code has expired');
+      return next();
     }
 
     // Increment scan count and log scan asynchronously
