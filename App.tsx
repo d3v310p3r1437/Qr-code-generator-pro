@@ -17,7 +17,7 @@ import {
   Loader2,
   QrCode,
   AlertTriangle,
-  Home
+  X
 } from 'lucide-react';
 
 const App: React.FC = () => {
@@ -159,10 +159,14 @@ const App: React.FC = () => {
           <h1 className="text-2xl font-bold text-slate-900 mb-4">Уучлаарай</h1>
           <p className="text-slate-600 mb-8 leading-relaxed">{message}</p>
           <button
-            onClick={() => window.location.href = '/'}
-            className="inline-flex items-center gap-2 text-blue-600 font-bold hover:underline"
+            onClick={() => {
+              window.close();
+              // Fallback for browsers that block window.close()
+              window.location.href = 'about:blank';
+            }}
+            className="inline-flex items-center gap-2 text-slate-500 font-bold hover:text-slate-800 hover:underline"
           >
-            <Home size={18} /> Нүүр хуудас руу буцах
+            <X size={18} /> Гарах
           </button>
         </div>
       </div>
