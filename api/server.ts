@@ -375,10 +375,12 @@ app.get('/r/:id', async (req, res, next) => {
     const { data: qr, error: fetchError } = await admin.from('qr_codes').select('*').eq('id', id).single();
     if (fetchError || !qr) {
       console.error(`[Redirect] QR code ${id} not found:`, fetchError);
+      req.url = '/';
       return next();
     }
     
     if (qr.expires_at && new Date(qr.expires_at) < new Date()) {
+      req.url = '/';
       return next();
     }
 
