@@ -1,5 +1,26 @@
 
-export type QRDataType = 'url' | 'text' | 'wifi';
+export type QRDataType = 'url' | 'text' | 'wifi' | 'file' | 'bio';
+
+export interface BioLink {
+  id: string;
+  label: string;
+  url: string;
+  icon?: string;
+}
+
+export interface BioData {
+  profile_image_url?: string;
+  name: string;
+  position?: string;
+  company?: string;
+  bio: string;
+  links: BioLink[];
+  theme_color: string;
+  text_color: string;
+  background_color: string;
+  button_color: string;
+  button_text_color: string;
+}
 
 export type DotsStyle = 'square' | 'dots' | 'rounded' | 'extra-rounded' | 'classy' | 'classy-rounded';
 export type CornerStyle = 'square' | 'dot' | 'extra-rounded';
@@ -38,6 +59,9 @@ export interface QRCodeData {
   created_at: string;
   type: QRDataType;
   qr_image_url?: string;
+  file_url?: string;
+  file_type?: string;
+  bio_data?: BioData;
 }
 
 export interface GeneratedHistory {

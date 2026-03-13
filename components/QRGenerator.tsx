@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import QRCodeStyling from 'qr-code-styling';
+import { motion } from 'framer-motion';
 import { 
   Download, 
   Settings, 
@@ -26,10 +27,25 @@ import {
   Save,
   ArrowLeft,
   Calendar,
-  Loader2
+  Loader2,
+  Layout,
+  User,
+  Instagram,
+  Facebook,
+  Twitter,
+  Linkedin,
+  Github,
+  Youtube,
+  Phone,
+  Mail,
+  ExternalLink,
+  Briefcase,
+  Building2,
+  X,
+  QrCode
 } from 'lucide-react';
 import { generateSlogan } from '../services/geminiService';
-import { QRConfig, QRDataType, DotsStyle, CornerStyle, UserProfile } from '../types';
+import { QRConfig, QRDataType, DotsStyle, CornerStyle, UserProfile, BioData, BioLink } from '../types';
 import { supabase } from '../services/supabaseClient';
 
 const THEMES = [
@@ -38,6 +54,15 @@ const THEMES = [
   { name: 'Royal', fg: '#1d4ed8', bg: '#f0f9ff' },
   { name: 'Forest', fg: '#064e3b', bg: '#f0fdf4' },
   { name: 'Sunset', fg: '#9a3412', bg: '#fff7ed' },
+  { name: 'Lavender', fg: '#6d28d9', bg: '#f5f3ff' },
+  { name: 'Emerald', fg: '#059669', bg: '#ecfdf5' },
+  { name: 'Rose', fg: '#e11d48', bg: '#fff1f2' },
+  { name: 'Ocean', fg: '#0369a1', bg: '#f0f9ff' },
+  { name: 'Gold', fg: '#854d0e', bg: '#fefce8' },
+  { name: 'Neon', fg: '#d946ef', bg: '#fdf4ff' },
+  { name: 'Mint', fg: '#0d9488', bg: '#f0fdfa' },
+  { name: 'Slate', fg: '#334155', bg: '#f8fafc' },
+  { name: 'Indigo', fg: '#4338ca', bg: '#eef2ff' },
 ];
 
 const DOT_STYLES: { id: DotsStyle; label: string }[] = [
@@ -73,6 +98,21 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
   const [url, setUrl] = useState<string>('https://google.com');
   const [text, setText] = useState<string>('');
   const [wifi, setWifi] = useState({ ssid: '', password: '', encryption: 'WPA' });
+  const [file, setFile] = useState<File | null>(null);
+  const [bioData, setBioData] = useState<BioData>({
+    name: '',
+    position: '',
+    company: '',
+    bio: '',
+    links: [],
+    theme_color: '#3b82f6',
+    text_color: '#0f172a',
+    background_color: '#f8fafc',
+    button_color: '#ffffff',
+    button_text_color: '#0f172a'
+  });
+  const [bioImage, setBioImage] = useState<File | null>(null);
+  const [bioImagePreview, setBioImagePreview] = useState<string>('');
   
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -81,6 +121,7 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
   const [slogan, setSlogan] = useState<string>('');
   const [loadingAI, setLoadingAI] = useState<boolean>(false);
   const [saving, setSaving] = useState(false);
+  const [showBioPreview, setShowBioPreview] = useState(false);
 
   const [config, setConfig] = useState<QRConfig>({
     value: 'https://google.com',
@@ -99,6 +140,8 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
   const qrRef = useRef<HTMLDivElement>(null);
   const qrCodeInstance = useRef<QRCodeStyling | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const logoInputRef = useRef<HTMLInputElement>(null);
+  const dataFileInputRef = useRef<HTMLInputElement>(null);
 
   const normalizedUrlValue = useMemo(() => {
     let input = url.trim();
@@ -161,6 +204,8 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
     if (activeTab === 'url') return normalizedUrlValue;
     if (activeTab === 'text') return text;
     if (activeTab === 'wifi') return `WIFI:S:${wifi.ssid};T:${wifi.encryption};P:${wifi.password};;`;
+    if (activeTab === 'file') return `${window.location.origin}/view/preview`;
+    if (activeTab === 'bio') return `${window.location.origin}/p/preview`;
     return '';
   };
 
@@ -169,12 +214,20 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
     if (!value) return;
     if (activeTab === 'url') setUrl(normalizedUrlValue);
     setConfig(prev => ({ ...prev, value }));
+    
+    if (activeTab === 'bio') {
+      setShowBioPreview(true);
+    }
   };
 
   const handleSave = async () => {
-    const targetUrl = getQRValue();
-    if (!targetUrl) {
+    let targetUrl = getQRValue();
+    if (!targetUrl && activeTab !== 'file') {
       alert('Мэдээллээ оруулна уу');
+      return;
+    }
+    if (activeTab === 'file' && !file) {
+      alert('Файлаа оруулна уу');
       return;
     }
     if (!title) {
@@ -183,11 +236,60 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
     }
 
     setSaving(true);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout for uploads
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      
+      let uploadedFileUrl = '';
+      let uploadedFileType = '';
+      let bioProfileUrl = '';
+
+      // Handle Bio Profile Image
+      if (activeTab === 'bio' && bioImage) {
+        const fileExt = bioImage.name.split('.').pop();
+        const fileName = `bio_${Math.random().toString(36).substring(2, 15)}_${Date.now()}.${fileExt}`;
+        const { error: uploadError } = await supabase.storage
+          .from('qrcodes')
+          .upload(`bios/${fileName}`, bioImage, {
+            contentType: bioImage.type,
+            upsert: true
+          });
+        if (uploadError) throw new Error('Профайл зураг хуулахад алдаа гарлаа');
+        const { data: { publicUrl } } = supabase.storage.from('qrcodes').getPublicUrl(`bios/${fileName}`);
+        bioProfileUrl = publicUrl;
+      }
+
+      if (activeTab === 'file' && file) {
+        const fileExt = file.name.split('.').pop();
+        const fileName = `${Math.random().toString(36).substring(2, 15)}_${Date.now()}.${fileExt}`;
+        const { error: uploadError } = await supabase.storage
+          .from('qrcodes')
+          .upload(`files/${fileName}`, file, {
+            contentType: file.type,
+            upsert: true
+          });
+
+        if (uploadError) throw new Error('Файл хуулахад алдаа гарлаа: ' + uploadError.message);
+
+        const { data: { publicUrl } } = supabase.storage
+          .from('qrcodes')
+          .getPublicUrl(`files/${fileName}`);
+          
+        uploadedFileUrl = publicUrl;
+        uploadedFileType = file.type;
+        targetUrl = publicUrl; // Temporary, will be replaced by redirect URL
+      }
+
       // 1. Insert into DB first to get the ID
       const response = await fetch('/api/qr-codes', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        signal: controller.signal,
         body: JSON.stringify({
           user_id: user.id,
           title,
@@ -195,7 +297,10 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
           target_url: targetUrl,
           config: config,
           expires_at: expiresAt || null,
-          type: activeTab
+          type: activeTab,
+          file_url: uploadedFileUrl || null,
+          file_type: uploadedFileType || null,
+          bio_data: activeTab === 'bio' ? { ...bioData, profile_image_url: bioProfileUrl || bioData.profile_image_url } : null
         })
       });
 
@@ -214,8 +319,10 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
       const qrData = await response.json();
 
       // 2. Generate the QR code image blob
-      // Only use redirect URL for 'url' type to maintain native functionality for Wi-Fi and Text
-      const qrValue = activeTab === 'url' ? `${window.location.origin}/r/${qrData.id}` : targetUrl;
+      // Use redirect URL for 'url', 'file', and 'bio' types
+      const qrValue = (activeTab === 'url' || activeTab === 'file' || activeTab === 'bio') 
+        ? `${window.location.origin}${activeTab === 'bio' ? '/p/' : '/r/'}${qrData.id}` 
+        : targetUrl;
       
       // Update the QR instance with the correct value before generating the blob
       if (qrCodeInstance.current) {
@@ -228,34 +335,45 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
       if (!blob) throw new Error('QR код үүсгэж чадсангүй');
 
       // 3. Upload image to Storage
-      const fileName = `${qrData.id}.png`;
-      const { error: uploadError } = await supabase.storage
+      const qrFileName = `${qrData.id}.png`;
+      const { error: qrUploadError } = await supabase.storage
         .from('qrcodes')
-        .upload(fileName, blob, {
+        .upload(qrFileName, blob, {
           contentType: 'image/png',
           upsert: true
         });
 
-      if (uploadError) {
-        console.error('Storage upload error:', uploadError);
+      if (qrUploadError) {
+        console.error('Storage upload error:', qrUploadError);
       } else {
         // 4. Get Public URL
         const { data: { publicUrl } } = supabase.storage
           .from('qrcodes')
-          .getPublicUrl(fileName);
+          .getPublicUrl(qrFileName);
 
-        // 5. Update DB with image URL
+        // 5. Update DB with image URL and correct target_url for bio/file
+        const updateData: any = { qr_image_url: publicUrl };
+        if (activeTab === 'bio' || activeTab === 'file') {
+          updateData.target_url = qrValue;
+        }
+
         await fetch(`/api/qr-codes/${qrData.id}`, {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ qr_image_url: publicUrl })
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          signal: controller.signal,
+          body: JSON.stringify(updateData)
         });
       }
       
+      clearTimeout(timeoutId);
       alert('QR код амжилттай хадгалагдлаа');
       onSaved();
     } catch (err: any) {
-      alert('Алдаа: ' + err.message);
+      clearTimeout(timeoutId);
+      alert('Алдаа: ' + (err.name === 'AbortError' ? 'Холболт салсан байна (Timeout)' : err.message));
     } finally {
       setSaving(false);
     }
@@ -366,6 +484,8 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
               { id: 'url', icon: LinkIcon, label: 'Вэб сайт' },
               { id: 'text', icon: FileText, label: 'Текст' },
               { id: 'wifi', icon: Wifi, label: 'Wi-Fi' },
+              { id: 'file', icon: Upload, label: 'Файл/Зураг' },
+              { id: 'bio', icon: Layout, label: 'Mini-Web' },
             ].map(tab => (
               <button
                 key={tab.id}
@@ -375,7 +495,7 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
                 }`}
               >
                 <tab.icon size={18} />
-                {tab.label}
+                <span className="hidden sm:inline">{tab.label}</span>
               </button>
             ))}
           </section>
@@ -425,6 +545,201 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
                   onChange={(e) => setWifi({ ...wifi, password: e.target.value })}
                   className="px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none"
                 />
+              </div>
+            )}
+            {activeTab === 'file' && (
+              <div className="border-2 border-dashed border-slate-200 rounded-2xl p-8 text-center hover:border-blue-500 transition-colors cursor-pointer" onClick={() => dataFileInputRef.current?.click()}>
+                <input
+                  type="file"
+                  ref={dataFileInputRef}
+                  className="hidden"
+                  onChange={(e) => {
+                    if (e.target.files && e.target.files[0]) {
+                      setFile(e.target.files[0]);
+                    }
+                  }}
+                  accept="image/*,video/*,application/pdf"
+                />
+                <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <Upload size={32} />
+                </div>
+                <h3 className="text-lg font-bold text-slate-900 mb-2">Файл хуулах</h3>
+                <p className="text-slate-500 text-sm mb-4">Зураг, Бичлэг эсвэл PDF файл сонгоно уу</p>
+                {file && (
+                  <div className="bg-blue-50 text-blue-700 p-3 rounded-xl inline-flex items-center gap-2 font-medium">
+                    <CheckCircle2 size={18} />
+                    {file.name} ({(file.size / 1024 / 1024).toFixed(2)} MB)
+                  </div>
+                )}
+              </div>
+            )}
+            
+            {activeTab === 'bio' && (
+              <div className="space-y-6">
+                <div className="flex flex-col md:flex-row gap-6">
+                  <div 
+                    className="w-32 h-32 rounded-2xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center cursor-pointer hover:border-blue-500 transition-all overflow-hidden bg-slate-50"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    {bioImagePreview ? (
+                      <img src={bioImagePreview} className="w-full h-full object-cover" alt="Preview" />
+                    ) : (
+                      <>
+                        <Upload size={24} className="text-slate-300 mb-1" />
+                        <span className="text-[10px] font-bold text-slate-400 uppercase">Зураг</span>
+                      </>
+                    )}
+                    <input 
+                      type="file" 
+                      ref={fileInputRef} 
+                      className="hidden" 
+                      accept="image/*"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          setBioImage(file);
+                          setBioImagePreview(URL.createObjectURL(file));
+                        }
+                      }}
+                    />
+                  </div>
+                  <div className="flex-1 space-y-4">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-500 mb-1 uppercase ml-1">Нэр</label>
+                      <input
+                        type="text"
+                        value={bioData.name}
+                        onChange={(e) => setBioData({ ...bioData, name: e.target.value })}
+                        className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                        placeholder="Таны нэр"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-500 mb-1 uppercase ml-1">Албан тушаал</label>
+                        <input
+                          type="text"
+                          value={bioData.position}
+                          onChange={(e) => setBioData({ ...bioData, position: e.target.value })}
+                          className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                          placeholder="Жишээ: Захирал"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-500 mb-1 uppercase ml-1">Байгууллага</label>
+                        <input
+                          type="text"
+                          value={bioData.company}
+                          onChange={(e) => setBioData({ ...bioData, company: e.target.value })}
+                          className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                          placeholder="Жишээ: Юнител"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-500 mb-1 uppercase ml-1">Намтар</label>
+                      <textarea
+                        value={bioData.bio}
+                        onChange={(e) => setBioData({ ...bioData, bio: e.target.value })}
+                        className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none text-sm resize-none"
+                        placeholder="Өөрийнхөө тухай товчхон..."
+                        rows={2}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-slate-500 uppercase ml-1">Сошиал холбоосууд</label>
+                    <button 
+                      onClick={() => {
+                        const newLink: BioLink = { id: Math.random().toString(36).substring(7), label: '', url: '', icon: 'globe' };
+                        setBioData({ ...bioData, links: [...bioData.links, newLink] });
+                      }}
+                      className="text-blue-600 text-xs font-bold flex items-center gap-1 hover:underline"
+                    >
+                      <Plus size={14} /> Нэмэх
+                    </button>
+                  </div>
+                  <div className="space-y-3">
+                    {bioData.links.map((link, idx) => (
+                      <div key={link.id} className="flex gap-2 items-start bg-slate-50 p-3 rounded-2xl border border-slate-100">
+                        <select 
+                          value={link.icon}
+                          onChange={(e) => {
+                            const newLinks = [...bioData.links];
+                            newLinks[idx].icon = e.target.value;
+                            setBioData({ ...bioData, links: newLinks });
+                          }}
+                          className="p-2 rounded-lg border border-slate-200 text-xs bg-white outline-none"
+                        >
+                          <option value="globe">Вэб</option>
+                          <option value="instagram">Instagram</option>
+                          <option value="facebook">Facebook</option>
+                          <option value="twitter">Twitter</option>
+                          <option value="linkedin">LinkedIn</option>
+                          <option value="github">GitHub</option>
+                          <option value="youtube">YouTube</option>
+                          <option value="phone">Утас</option>
+                          <option value="mail">Имэйл</option>
+                        </select>
+                        <div className="flex-1 space-y-2">
+                          <input
+                            type="text"
+                            placeholder="Товчлуурын нэр"
+                            value={link.label}
+                            onChange={(e) => {
+                              const newLinks = [...bioData.links];
+                              newLinks[idx].label = e.target.value;
+                              setBioData({ ...bioData, links: newLinks });
+                            }}
+                            className="w-full px-3 py-1.5 rounded-lg border border-slate-200 text-xs outline-none"
+                          />
+                          <input
+                            type="text"
+                            placeholder="URL эсвэл Утас/Имэйл"
+                            value={link.url}
+                            onChange={(e) => {
+                              const newLinks = [...bioData.links];
+                              newLinks[idx].url = e.target.value;
+                              setBioData({ ...bioData, links: newLinks });
+                            }}
+                            className="w-full px-3 py-1.5 rounded-lg border border-slate-200 text-xs outline-none"
+                          />
+                        </div>
+                        <button 
+                          onClick={() => {
+                            const newLinks = bioData.links.filter((_, i) => i !== idx);
+                            setBioData({ ...bioData, links: newLinks });
+                          }}
+                          className="p-2 text-slate-300 hover:text-red-500 transition-colors"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Арын өнгө</label>
+                    <input type="color" value={bioData.background_color} onChange={(e) => setBioData({...bioData, background_color: e.target.value})} className="w-full h-10 rounded-lg cursor-pointer" />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Текст өнгө</label>
+                    <input type="color" value={bioData.text_color} onChange={(e) => setBioData({...bioData, text_color: e.target.value})} className="w-full h-10 rounded-lg cursor-pointer" />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Товч өнгө</label>
+                    <input type="color" value={bioData.button_color} onChange={(e) => setBioData({...bioData, button_color: e.target.value})} className="w-full h-10 rounded-lg cursor-pointer" />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Товч текст</label>
+                    <input type="color" value={bioData.button_text_color} onChange={(e) => setBioData({...bioData, button_text_color: e.target.value})} className="w-full h-10 rounded-lg cursor-pointer" />
+                  </div>
+                </div>
               </div>
             )}
             
@@ -528,10 +843,10 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
               Төв лого
             </h2>
             {!config.logoSrc ? (
-              <div onClick={() => fileInputRef.current?.click()} className="border-2 border-dashed border-slate-200 rounded-2xl p-8 flex flex-col items-center justify-center hover:border-blue-400 hover:bg-blue-50 transition-all cursor-pointer">
+              <div onClick={() => logoInputRef.current?.click()} className="border-2 border-dashed border-slate-200 rounded-2xl p-8 flex flex-col items-center justify-center hover:border-blue-400 hover:bg-blue-50 transition-all cursor-pointer">
                 <Upload className="text-slate-300 mb-2" size={32} />
                 <p className="text-sm text-slate-500 font-bold">Лого оруулах</p>
-                <input ref={fileInputRef} type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" />
+                <input ref={logoInputRef} type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" />
               </div>
             ) : (
               <div className="flex items-center gap-6 p-4 bg-slate-50 rounded-2xl border border-slate-100">
@@ -617,6 +932,140 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
           </div>
         </div>
       </main>
+
+      {/* Bio Preview Modal */}
+      {showBioPreview && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <motion.div 
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="bg-white w-full max-w-lg rounded-[32px] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+          >
+            <div className="p-4 border-b flex items-center justify-between bg-white sticky top-0 z-10">
+              <h3 className="font-bold text-slate-800 flex items-center gap-2 ml-2">
+                <Layout size={18} className="text-blue-600" />
+                Mini-Web Урьдчилан харах
+              </h3>
+              <button 
+                onClick={() => setShowBioPreview(false)}
+                className="p-2 hover:bg-slate-100 rounded-full transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-6 bg-slate-50">
+              <div 
+                className="w-full rounded-[24px] shadow-sm flex flex-col items-center py-10 px-6 min-h-[500px]"
+                style={{ backgroundColor: bioData.background_color || '#f8fafc' }}
+              >
+                {/* Profile Image */}
+                <div className="w-28 h-28 rounded-full border-4 border-white shadow-lg overflow-hidden mb-6 bg-white flex-shrink-0">
+                  {bioImagePreview ? (
+                    <img 
+                      src={bioImagePreview} 
+                      alt={bioData.name} 
+                      className="w-full h-full object-cover"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center bg-slate-100 text-slate-300">
+                      <User size={40} />
+                    </div>
+                  )}
+                </div>
+
+                {/* Name & Bio */}
+                <div className="text-center mb-8 w-full">
+                  <h1 
+                    className="text-xl font-black mb-1"
+                    style={{ color: bioData.text_color || '#0f172a' }}
+                  >
+                    {bioData.name || 'Таны нэр'}
+                  </h1>
+
+                  {(bioData.position || bioData.company) && (
+                    <div 
+                      className="flex flex-wrap justify-center items-center gap-x-3 gap-y-1 mb-3 text-xs font-medium opacity-70"
+                      style={{ color: bioData.text_color || '#475569' }}
+                    >
+                      {bioData.position && (
+                        <div className="flex items-center gap-1">
+                          <Briefcase size={12} />
+                          <span>{bioData.position}</span>
+                        </div>
+                      )}
+                      {bioData.company && (
+                        <div className="flex items-center gap-1">
+                          <Building2 size={12} />
+                          <span>{bioData.company}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <p 
+                    className="text-xs opacity-80 leading-relaxed max-w-[240px] mx-auto"
+                    style={{ color: bioData.text_color || '#475569' }}
+                  >
+                    {bioData.bio || 'Таны намтар энд харагдана...'}
+                  </p>
+                </div>
+
+                {/* Links */}
+                <div className="w-full space-y-3">
+                  {bioData.links.length > 0 ? bioData.links.map((link) => {
+                    // Simple icon mapping for preview
+                    const Icon = link.icon === 'mail' ? Mail : 
+                                link.icon === 'phone' ? Phone : 
+                                link.icon === 'facebook' ? Facebook :
+                                link.icon === 'instagram' ? Instagram :
+                                link.icon === 'twitter' ? Twitter :
+                                link.icon === 'linkedin' ? Linkedin :
+                                link.icon === 'github' ? Github :
+                                link.icon === 'youtube' ? Youtube : Globe;
+
+                    return (
+                      <div
+                        key={link.id}
+                        className="flex items-center p-3 rounded-xl shadow-sm border border-white/10"
+                        style={{ 
+                          backgroundColor: bioData.button_color || '#ffffff',
+                          color: bioData.button_text_color || '#0f172a'
+                        }}
+                      >
+                        <div className="p-1.5 rounded-lg bg-black/5 mr-3">
+                          <Icon size={16} />
+                        </div>
+                        <div className="flex-1 flex flex-col">
+                          <span className="font-bold text-xs">{link.label || 'Холбоос'}</span>
+                          {(link.icon === 'mail' || link.icon === 'phone') && link.url && (
+                            <span className="text-[9px] opacity-50 font-medium">{link.url}</span>
+                          )}
+                        </div>
+                        <ExternalLink size={14} className="opacity-30" />
+                      </div>
+                    );
+                  }) : (
+                    <div className="text-center py-8 border-2 border-dashed border-slate-200 rounded-2xl text-slate-400 text-xs font-medium">
+                      Холбоос нэмээгүй байна
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+            
+            <div className="p-4 border-t bg-white flex justify-center">
+              <button 
+                onClick={() => setShowBioPreview(false)}
+                className="px-8 py-2.5 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-all shadow-md"
+              >
+                Болсон
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
     </div>
   );
 };

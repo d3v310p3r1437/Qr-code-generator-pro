@@ -17,11 +17,13 @@ import {
   BarChart3,
   Calendar,
   Copy,
-  Download
+  Download,
+  Edit3
 } from 'lucide-react';
 import { UserProfile, QRCodeData } from '../types';
 import { QRGenerator } from './QRGenerator';
 import { QRDetailsModal } from './QRDetailsModal';
+import { EditQRModal } from './EditQRModal';
 
 export const AdminDashboard: React.FC<{ profile: UserProfile }> = ({ profile }) => {
   const [activeTab, setActiveTab] = useState<'users' | 'qrs' | 'create'>('qrs');
@@ -30,6 +32,7 @@ export const AdminDashboard: React.FC<{ profile: UserProfile }> = ({ profile }) 
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [selectedQR, setSelectedQR] = useState<QRCodeData | null>(null);
+  const [editingQR, setEditingQR] = useState<QRCodeData | null>(null);
   
   // Create User Form State
   const [email, setEmail] = useState('');
@@ -41,19 +44,28 @@ export const AdminDashboard: React.FC<{ profile: UserProfile }> = ({ profile }) 
 
   const fetchData = async () => {
     setLoading(true);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      const headers = { 'Authorization': `Bearer ${token}` };
+
       if (activeTab === 'users') {
-        const response = await fetch('/api/admin/profiles');
+        const response = await fetch('/api/admin/profiles', { headers, signal: controller.signal });
+        clearTimeout(timeoutId);
         if (!response.ok) throw new Error('Failed to fetch profiles');
         const data = await response.json();
         setUsers(data);
       } else if (activeTab === 'qrs') {
-        const response = await fetch('/api/admin/qr-codes');
+        const response = await fetch('/api/admin/qr-codes', { headers, signal: controller.signal });
+        clearTimeout(timeoutId);
         if (!response.ok) throw new Error('Failed to fetch QR codes');
         const data = await response.json();
         setAllQrs(data);
       }
     } catch (err: any) {
+      clearTimeout(timeoutId);
       console.error('Fetch error:', err);
     } finally {
       setLoading(false);
@@ -70,9 +82,15 @@ export const AdminDashboard: React.FC<{ profile: UserProfile }> = ({ profile }) 
     setError(null);
 
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+
       const response = await fetch('/api/admin/create-user', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify({ email, password, role, qr_limit: qrLimit }),
       });
 
@@ -96,19 +114,17 @@ export const AdminDashboard: React.FC<{ profile: UserProfile }> = ({ profile }) 
     if (!window.confirm('Та энэ QR кодыг устгахдаа итгэлтэй байна уу?')) return;
     
     try {
-      // 1. Delete from DB
-      const response = await fetch(`/api/qr-codes/${id}`, { method: 'DELETE' });
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+
+      // 1. Delete from DB (Server will handle storage deletion)
+      const response = await fetch(`/api/qr-codes/${id}`, { 
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
       if (!response.ok) {
         const errData = await response.json();
         throw new Error(errData.error || 'Устгаж чадсангүй');
-      }
-
-      // 2. Delete from Storage if exists
-      if (imageUrl) {
-        const fileName = imageUrl.split('/').pop();
-        if (fileName) {
-          await supabase.storage.from('qrcodes').remove([fileName]);
-        }
       }
 
       fetchData();
@@ -120,7 +136,13 @@ export const AdminDashboard: React.FC<{ profile: UserProfile }> = ({ profile }) 
   const handleDeleteUser = async (id: string) => {
     if (!window.confirm('Та энэ хэрэглэгчийг устгахдаа итгэлтэй байна уу? (Түүний бүх QR кодууд хамт устгагдана)')) return;
     try {
-      const response = await fetch(`/api/admin/profiles/${id}`, { method: 'DELETE' });
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+
+      const response = await fetch(`/api/admin/profiles/${id}`, { 
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
       if (!response.ok) {
         const errData = await response.json();
         throw new Error(errData.error || 'Хэрэглэгчийг устгаж чадсангүй');
@@ -153,7 +175,13 @@ export const AdminDashboard: React.FC<{ profile: UserProfile }> = ({ profile }) 
     if (!window.confirm('Бүх QR кодын уншилтын тоог логтой нь тулгаж шинэчлэх үү?')) return;
     setSyncing(true);
     try {
-      const response = await fetch('/api/admin/sync-counts', { method: 'POST' });
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+
+      const response = await fetch('/api/admin/sync-counts', { 
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
       if (!response.ok) throw new Error('Sync failed');
       const result = await response.json();
       alert(`${result.synced} QR кодын тоог амжилттай шинэчиллээ.`);
@@ -386,9 +414,10 @@ export const AdminDashboard: React.FC<{ profile: UserProfile }> = ({ profile }) 
                         </div>
                       </td>
                       <td className="px-6 py-4">
-                        <div className="text-xs text-slate-500 truncate max-w-[200px] font-mono" title={qr.target_url}>{qr.target_url}</div>
+                        <div className="text-xs text-slate-500 truncate max-w-[200px] font-mono" title={qr.type === 'file' ? 'Файл' : qr.target_url}>{qr.type === 'file' ? 'Файл' : qr.target_url}</div>
                         <button 
-                          onClick={() => {
+                          onClick={(e) => {
+                            e.stopPropagation();
                             const redirectUrl = `${window.location.origin}/r/${qr.id}`;
                             navigator.clipboard.writeText(redirectUrl);
                             alert('Redirect холбоос хуулагдлаа');
@@ -419,9 +448,16 @@ export const AdminDashboard: React.FC<{ profile: UserProfile }> = ({ profile }) 
                               <Download size={18} />
                             </button>
                           )}
-                          <a href={qr.target_url} target="_blank" rel="noreferrer" className="p-2 text-slate-400 hover:text-blue-600 transition-colors" title="Нээх">
+                          <a href={qr.type === 'file' ? `/view/${qr.id}` : qr.target_url} target="_blank" rel="noreferrer" className="p-2 text-slate-400 hover:text-blue-600 transition-colors" title="Нээх">
                             <ExternalLink size={18} />
                           </a>
+                          <button 
+                            onClick={() => setEditingQR(qr)}
+                            className="p-2 text-slate-400 hover:text-blue-600 transition-colors"
+                            title="Засварлах"
+                          >
+                            <Edit3 size={18} />
+                          </button>
                           <button 
                             onClick={() => handleDeleteQR(qr.id, qr.qr_image_url)}
                             className="p-2 text-slate-400 hover:text-red-500 transition-colors"
@@ -452,6 +488,17 @@ export const AdminDashboard: React.FC<{ profile: UserProfile }> = ({ profile }) 
         <QRDetailsModal 
           qr={selectedQR} 
           onClose={() => setSelectedQR(null)} 
+        />
+      )}
+
+      {editingQR && (
+        <EditQRModal 
+          qr={editingQR} 
+          onClose={() => setEditingQR(null)} 
+          onSaved={() => {
+            fetchData();
+            setEditingQR(null);
+          }} 
         />
       )}
     </div>

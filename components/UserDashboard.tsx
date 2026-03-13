@@ -15,8 +15,10 @@ import {
   Clock,
   CheckCircle2,
   Download,
-  Copy
+  Copy,
+  Edit3
 } from 'lucide-react';
+import { EditQRModal } from './EditQRModal';
 
 interface UserDashboardProps {
   profile: UserProfile;
@@ -27,15 +29,28 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({ profile, onNewQR }
   const [qrs, setQrs] = useState<QRCodeData[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedQR, setSelectedQR] = useState<QRCodeData | null>(null);
+  const [editingQR, setEditingQR] = useState<QRCodeData | null>(null);
 
   const fetchQRs = async () => {
     setLoading(true);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
     try {
-      const response = await fetch(`/api/user/qr-codes/${profile.id}`);
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+
+      const response = await fetch(`/api/user/qr-codes/${profile.id}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        },
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
       if (!response.ok) throw new Error('Failed to fetch QR codes');
       const data = await response.json();
       setQrs(data);
     } catch (err: any) {
+      clearTimeout(timeoutId);
       console.error('Fetch error:', err);
     } finally {
       setLoading(false);
@@ -50,19 +65,19 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({ profile, onNewQR }
     if (!window.confirm('Та энэ QR кодыг устгахдаа итгэлтэй байна уу?')) return;
     
     try {
-      // 1. Delete from DB
-      const response = await fetch(`/api/qr-codes/${id}`, { method: 'DELETE' });
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+
+      // 1. Delete from DB (Server will handle storage deletion)
+      const response = await fetch(`/api/qr-codes/${id}`, { 
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
       if (!response.ok) {
         const errData = await response.json();
         throw new Error(errData.error || 'Устгаж чадсангүй');
-      }
-
-      // 2. Delete from Storage if exists
-      if (imageUrl) {
-        const fileName = imageUrl.split('/').pop();
-        if (fileName) {
-          await supabase.storage.from('qrcodes').remove([fileName]);
-        }
       }
 
       fetchQRs();
@@ -160,15 +175,30 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({ profile, onNewQR }
                       {expired ? <Clock size={12} /> : <CheckCircle2 size={12} />}
                       {expired ? 'Хугацаа дууссан' : 'Идэвхтэй'}
                     </div>
-                    <button 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDelete(qr.id, qr.qr_image_url);
-                      }}
-                      className="text-slate-300 hover:text-red-500 transition-colors p-1"
-                    >
-                      <Trash2 size={18} />
-                    </button>
+                    <div className="flex items-center gap-2">
+                      {profile.role === 'admin' && (
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingQR(qr);
+                          }}
+                          className="text-slate-300 hover:text-blue-500 transition-colors p-1"
+                          title="Засварлах"
+                        >
+                          <Edit3 size={18} />
+                        </button>
+                      )}
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDelete(qr.id, qr.qr_image_url);
+                        }}
+                        className="text-slate-300 hover:text-red-500 transition-colors p-1"
+                        title="Устгах"
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                    </div>
                   </div>
                   
                   <div className="flex gap-4 mb-4">
@@ -208,8 +238,8 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({ profile, onNewQR }
                   </div>
                 </div>
                 <div className="bg-slate-50 p-4 flex items-center justify-between gap-2" onClick={(e) => e.stopPropagation()}>
-                  <div className="flex items-center gap-2 text-[10px] font-bold text-slate-400 uppercase truncate max-w-[150px]" title={qr.target_url}>
-                    <QrCode size={12} /> {qr.target_url}
+                  <div className="flex items-center gap-2 text-[10px] font-bold text-slate-400 uppercase truncate max-w-[150px]" title={qr.type === 'file' ? 'Файл' : qr.target_url}>
+                    <QrCode size={12} /> {qr.type === 'file' ? 'Файл' : qr.target_url}
                   </div>
                   <div className="flex items-center gap-3 shrink-0">
                     <button 
@@ -233,7 +263,7 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({ profile, onNewQR }
                       </button>
                     )}
                     <a 
-                      href={qr.target_url} 
+                      href={qr.type === 'file' ? `/view/${qr.id}` : qr.target_url} 
                       target="_blank" 
                       rel="noreferrer"
                       className="text-blue-600 hover:text-blue-700 transition-colors"
@@ -252,6 +282,17 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({ profile, onNewQR }
         <QRDetailsModal 
           qr={selectedQR} 
           onClose={() => setSelectedQR(null)} 
+        />
+      )}
+
+      {editingQR && (
+        <EditQRModal 
+          qr={editingQR} 
+          onClose={() => setEditingQR(null)} 
+          onSaved={() => {
+            fetchQRs();
+            setEditingQR(null);
+          }} 
         />
       )}
     </div>

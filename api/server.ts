@@ -4,6 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { UAParser } from 'ua-parser-js';
 
 dotenv.config();
 
@@ -29,6 +30,34 @@ setInterval(() => {
     }
   }
 }, CLEANUP_INTERVAL);
+
+// Scan count buffer to prevent race conditions
+const scanCountBuffer = new Map<string, number>();
+const FLUSH_INTERVAL = 5000; // 5 seconds
+
+setInterval(async () => {
+  if (scanCountBuffer.size === 0) return;
+  
+  const admin = getSupabaseAdmin();
+  if (!admin) return;
+
+  const updates = Array.from(scanCountBuffer.entries());
+  scanCountBuffer.clear();
+
+  for (const [id, countToAdd] of updates) {
+    try {
+      const { data: latestQR } = await admin.from('qr_codes').select('scan_count').eq('id', id).single();
+      const currentCount = latestQR?.scan_count || 0;
+      
+      await admin.from('qr_codes')
+        .update({ scan_count: currentCount + countToAdd })
+        .eq('id', id);
+    } catch (err) {
+      console.error(`[Buffer] Failed to update scan count for ${id}:`, err);
+      scanCountBuffer.set(id, (scanCountBuffer.get(id) || 0) + countToAdd);
+    }
+  }
+}, FLUSH_INTERVAL);
 
 // Increase payload limit for large QR logos
 app.use(express.json({ limit: '10mb' }));
@@ -78,6 +107,62 @@ apiRouter.use((req, res, next) => {
   next();
 });
 
+// Ping route for testing
+apiRouter.get('/ping', (req, res) => {
+  res.json({ status: 'ok', time: new Date().toISOString() });
+});
+
+// Middleware to verify Supabase JWT
+const requireAuth = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  console.log(`[Auth] Checking auth for ${req.method} ${req.url}`);
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    console.warn(`[Auth] Missing auth header for ${req.url}`);
+    return res.status(401).json({ error: 'Missing authorization header' });
+  }
+
+  const token = authHeader.replace('Bearer ', '');
+  const admin = getSupabaseAdmin();
+  
+  if (!admin) {
+    console.error('[Auth] Supabase Admin not configured');
+    return res.status(500).json({ error: 'Supabase Admin client not configured' });
+  }
+
+  try {
+    const { data: { user }, error } = await admin.auth.getUser(token);
+    if (error || !user) {
+      console.warn(`[Auth] Invalid token for ${req.url}:`, error?.message);
+      return res.status(401).json({ error: 'Invalid token' });
+    }
+    
+    console.log(`[Auth] User authenticated: ${user.email}`);
+    (req as any).user = user;
+    next();
+  } catch (err: any) {
+    console.error(`[Auth] Exception during auth for ${req.url}:`, err.message);
+    res.status(401).json({ error: 'Authentication failed' });
+  }
+};
+
+const requireAdmin = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const user = (req as any).user;
+  if (!user) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+
+  const admin = getSupabaseAdmin();
+  try {
+    const { data: profile } = await admin.from('profiles').select('role').eq('id', user.id).single();
+    if (!profile || profile.role !== 'admin') {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+    next();
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to verify admin status' });
+  }
+};
+
 // Health check endpoint
 apiRouter.get('/health', async (req, res) => {
   const admin = getSupabaseAdmin();
@@ -108,7 +193,7 @@ apiRouter.get('/health', async (req, res) => {
 });
 
 // API Route for Admin to create users
-apiRouter.post('/admin/create-user', async (req, res) => {
+apiRouter.post('/admin/create-user', requireAuth, requireAdmin, async (req, res) => {
   const admin = getSupabaseAdmin();
   if (!admin) {
     return res.status(500).json({ error: 'Supabase Admin client not configured' });
@@ -145,7 +230,8 @@ apiRouter.post('/admin/create-user', async (req, res) => {
 });
 
 // Get Profile
-apiRouter.get('/profile/:id', async (req, res) => {
+apiRouter.get('/profile/:id', requireAuth, async (req, res) => {
+  console.log(`[API] Profile request for ID: ${req.params.id}`);
   const admin = getSupabaseAdmin();
   if (!admin) {
     return res.status(500).json({ error: 'Supabase Admin client not configured' });
@@ -187,7 +273,7 @@ apiRouter.get('/profile/:id', async (req, res) => {
 });
 
 // Get All Profiles with QR counts
-apiRouter.get('/admin/profiles', async (req, res) => {
+apiRouter.get('/admin/profiles', requireAuth, requireAdmin, async (req, res) => {
   const admin = getSupabaseAdmin();
   if (!admin) return res.status(500).json({ error: 'Supabase Admin client not configured' });
   try {
@@ -216,7 +302,7 @@ apiRouter.get('/admin/profiles', async (req, res) => {
 });
 
 // Get All QR Codes
-apiRouter.get('/admin/qr-codes', async (req, res) => {
+apiRouter.get('/admin/qr-codes', requireAuth, requireAdmin, async (req, res) => {
   const admin = getSupabaseAdmin();
   if (!admin) return res.status(500).json({ error: 'Supabase Admin client not configured' });
   try {
@@ -229,7 +315,7 @@ apiRouter.get('/admin/qr-codes', async (req, res) => {
 });
 
 // Save QR Code
-apiRouter.post('/qr-codes', async (req, res) => {
+apiRouter.post('/qr-codes', requireAuth, async (req, res) => {
   const admin = getSupabaseAdmin();
   if (!admin) return res.status(500).json({ error: 'Supabase Admin client not configured' });
   try {
@@ -242,11 +328,23 @@ apiRouter.post('/qr-codes', async (req, res) => {
 });
 
 // Update QR Code
-apiRouter.patch('/qr-codes/:id', async (req, res) => {
+apiRouter.patch('/qr-codes/:id', requireAuth, async (req, res) => {
   const admin = getSupabaseAdmin();
   if (!admin) return res.status(500).json({ error: 'Supabase Admin client not configured' });
   const { id } = req.params;
+  const user = (req as any).user;
+
   try {
+    const { data: qr, error: fetchError } = await admin.from('qr_codes').select('user_id').eq('id', id).single();
+    if (fetchError || !qr) return res.status(404).json({ error: 'QR code not found' });
+
+    if (qr.user_id !== user.id) {
+      const { data: profile } = await admin.from('profiles').select('role').eq('id', user.id).single();
+      if (!profile || profile.role !== 'admin') {
+        return res.status(403).json({ error: 'Unauthorized to update this QR code' });
+      }
+    }
+
     const { data, error } = await admin.from('qr_codes').update(req.body).eq('id', id).select().single();
     if (error) throw error;
     res.json(data);
@@ -256,11 +354,31 @@ apiRouter.patch('/qr-codes/:id', async (req, res) => {
 });
 
 // Delete QR Code
-apiRouter.delete('/qr-codes/:id', async (req, res) => {
+apiRouter.delete('/qr-codes/:id', requireAuth, async (req, res) => {
   const admin = getSupabaseAdmin();
   if (!admin) return res.status(500).json({ error: 'Supabase Admin client not configured' });
   const { id } = req.params;
+  const user = (req as any).user;
+
   try {
+    const { data: qr, error: fetchError } = await admin.from('qr_codes').select('user_id, qr_image_url').eq('id', id).single();
+    if (fetchError || !qr) throw new Error('QR code not found');
+
+    if (qr.user_id !== user.id) {
+      const { data: profile } = await admin.from('profiles').select('role').eq('id', user.id).single();
+      if (!profile || profile.role !== 'admin') {
+        return res.status(403).json({ error: 'Unauthorized to delete this QR code' });
+      }
+    }
+
+    // Delete from Storage if exists
+    if (qr.qr_image_url) {
+      const fileName = qr.qr_image_url.split('/').pop();
+      if (fileName) {
+        await admin.storage.from('qrcodes').remove([fileName]);
+      }
+    }
+
     const { error } = await admin.from('qr_codes').delete().eq('id', id);
     if (error) throw error;
     res.json({ success: true });
@@ -270,7 +388,7 @@ apiRouter.delete('/qr-codes/:id', async (req, res) => {
 });
 
 // Delete Profile
-apiRouter.delete('/admin/profiles/:id', async (req, res) => {
+apiRouter.delete('/admin/profiles/:id', requireAuth, requireAdmin, async (req, res) => {
   const admin = getSupabaseAdmin();
   if (!admin) return res.status(500).json({ error: 'Supabase Admin client not configured' });
   const { id } = req.params;
@@ -284,7 +402,7 @@ apiRouter.delete('/admin/profiles/:id', async (req, res) => {
 });
 
 // Get User QR Codes
-apiRouter.get('/user/qr-codes/:userId', async (req, res) => {
+apiRouter.get('/user/qr-codes/:userId', requireAuth, async (req, res) => {
   const admin = getSupabaseAdmin();
   if (!admin) return res.status(500).json({ error: 'Supabase Admin client not configured' });
   const { userId } = req.params;
@@ -298,7 +416,7 @@ apiRouter.get('/user/qr-codes/:userId', async (req, res) => {
 });
 
 // Get Analytics for a QR Code
-apiRouter.get('/qr-codes/:id/analytics', async (req, res) => {
+apiRouter.get('/qr-codes/:id/analytics', requireAuth, async (req, res) => {
   const admin = getSupabaseAdmin();
   if (!admin) return res.status(500).json({ error: 'Supabase Admin client not configured' });
   const { id } = req.params;
@@ -325,7 +443,7 @@ apiRouter.get('/qr-codes/:id/analytics', async (req, res) => {
 });
 
 // Sync Scan Counts with Logs
-apiRouter.post('/admin/sync-counts', async (req, res) => {
+apiRouter.post('/admin/sync-counts', requireAuth, requireAdmin, async (req, res) => {
   const admin = getSupabaseAdmin();
   if (!admin) return res.status(500).json({ error: 'Supabase Admin client not configured' });
   
@@ -362,6 +480,62 @@ apiRouter.post('/admin/sync-counts', async (req, res) => {
   }
 });
 
+// Get Public QR Code Details (for view page)
+apiRouter.get('/public/qr-codes/:id', async (req, res) => {
+  const admin = getSupabaseAdmin();
+  if (!admin) return res.status(500).json({ error: 'Supabase Admin client not configured' });
+  const { id } = req.params;
+  try {
+    const { data, error } = await admin
+      .from('qr_codes')
+      .select('id, title, description, type, file_url, file_type, target_url, bio_data')
+      .eq('id', id)
+      .single();
+    if (error) throw error;
+    res.json(data);
+  } catch (error: any) {
+    res.status(404).json({ error: 'QR code not found' });
+  }
+});
+
+// Track scan for Mini-Web (Bio) pages
+apiRouter.post('/scan/:id', async (req, res) => {
+  const { id } = req.params;
+  const admin = getSupabaseAdmin();
+  if (!admin) return res.status(500).json({ error: 'Server configuration error' });
+  
+  try {
+    const { data: qr, error: fetchError } = await admin.from('qr_codes').select('scan_count').eq('id', id).single();
+    if (fetchError || !qr) return res.status(404).json({ error: 'QR code not found' });
+
+    await admin.from('qr_codes').update({ scan_count: (qr.scan_count || 0) + 1 }).eq('id', id);
+
+    const ip = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+    const userAgent = req.headers['user-agent'];
+    
+    const scanLogData: any = { 
+      qr_code_id: id,
+      ip_address: Array.isArray(ip) ? ip[0] : (typeof ip === 'string' ? ip.split(',')[0].trim() : ip),
+      user_agent: userAgent
+    };
+
+    if (userAgent) {
+      const parser = new UAParser(userAgent as string);
+      const device = parser.getDevice();
+      const os = parser.getOS();
+      const browser = parser.getBrowser();
+      scanLogData.device_type = device.type || 'desktop';
+      scanLogData.os_name = os.name || 'Unknown';
+      scanLogData.browser_name = browser.name || 'Unknown';
+    }
+
+    await admin.from('scan_logs').insert(scanLogData).catch(console.error);
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Mount API Router
 app.use('/api', apiRouter);
 
@@ -392,7 +566,8 @@ app.get('/r/:id', async (req, res, next) => {
     // Skip logging for prefetch requests
     if (purpose === 'prefetch' || purpose === 'preview') {
       console.log(`[Redirect] Skipping log for prefetch/preview request for QR ${id}`);
-      return res.redirect(qr.target_url);
+      const redirectPath = qr.type === 'file' ? `/view/${id}` : (qr.type === 'bio' ? `/p/${id}` : qr.target_url);
+      return res.redirect(redirectPath);
     }
 
     // Debounce: prevent double logging from the same IP within 2 seconds
@@ -402,7 +577,8 @@ app.get('/r/:id', async (req, res, next) => {
       const lastScan = recentScans.get(scanKey)!;
       if (now - lastScan < DEBOUNCE_WINDOW) {
         console.log(`[Redirect] Skipping duplicate scan for QR ${id} from IP ${ip} (within ${DEBOUNCE_WINDOW}ms)`);
-        return res.redirect(qr.target_url);
+        const redirectPath = qr.type === 'file' ? `/view/${id}` : (qr.type === 'bio' ? `/p/${id}` : qr.target_url);
+        return res.redirect(redirectPath);
       }
     }
     recentScans.set(scanKey, now);
@@ -411,6 +587,41 @@ app.get('/r/:id', async (req, res, next) => {
       qr_code_id: id,
       ip_address: Array.isArray(ip) ? ip[0] : (typeof ip === 'string' ? ip.split(',')[0].trim() : ip),
       user_agent: userAgent
+    };
+
+    // Parse User Agent
+    if (userAgent) {
+      const parser = new UAParser(userAgent as string);
+      const device = parser.getDevice();
+      const os = parser.getOS();
+      const browser = parser.getBrowser();
+      
+      scanLogData.device_type = device.type || 'desktop';
+      scanLogData.os_name = os.name || 'Unknown';
+      scanLogData.browser_name = browser.name || 'Unknown';
+    }
+
+    // Get Location (Simple IP-based lookup)
+    const fetchLocation = async () => {
+      try {
+        const ipToLookup = scanLogData.ip_address;
+        if (ipToLookup && ipToLookup !== '::1' && ipToLookup !== '127.0.0.1') {
+          // Use globalThis.fetch if available (Node 18+) or fallback
+          const fetchFn = (globalThis as any).fetch;
+          if (typeof fetchFn === 'function') {
+            const geoRes = await fetchFn(`https://ipapi.co/${ipToLookup}/json/`);
+            if (geoRes.ok) {
+              const geoData = await geoRes.json();
+              scanLogData.country = geoData.country_name || 'Unknown';
+              scanLogData.city = geoData.city || 'Unknown';
+            }
+          } else {
+            console.warn('[Redirect] fetch is not defined in this environment');
+          }
+        }
+      } catch (e) {
+        console.error('[Redirect] Geo lookup error:', e);
+      }
     };
 
     // Use a more reliable way to update count by fetching the latest value
@@ -431,6 +642,7 @@ app.get('/r/:id', async (req, res, next) => {
 
     const logScan = async () => {
       try {
+        await fetchLocation();
         const { error } = await admin.from('scan_logs').insert(scanLogData);
         if (error) {
           if (error.code === '42P01' || error.message.includes('relation "scan_logs" does not exist')) {
@@ -452,6 +664,14 @@ app.get('/r/:id', async (req, res, next) => {
       (req as any)._scanLogged = true;
       updateScanCount();
       logScan();
+    }
+
+    if (qr.type === 'file') {
+      return res.redirect(`/view/${id}`);
+    }
+
+    if (qr.type === 'bio') {
+      return res.redirect(`/p/${id}`);
     }
 
     res.redirect(qr.target_url);
@@ -493,9 +713,18 @@ async function setupServer() {
 
 // Initialize server setup only if NOT on Vercel
 if (!process.env.VERCEL) {
+  process.on('unhandledRejection', (reason, promise) => {
+    console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  });
+
+  process.on('uncaughtException', (err) => {
+    console.error('Uncaught Exception:', err);
+  });
+
   setupServer().then(() => {
     app.listen(PORT, '0.0.0.0', () => {
-      console.log(`Server running on http://localhost:${PORT}`);
+      console.log(`🚀 Server is strictly listening on 0.0.0.0:${PORT}`);
+      console.log(`🔗 App URL: ${process.env.APP_URL || 'Not set'}`);
     });
   }).catch(err => {
     console.error('Failed to setup server:', err);

@@ -8,6 +8,7 @@ import { AdminDashboard } from './components/AdminDashboard';
 import { UserDashboard } from './components/UserDashboard';
 import { QRGenerator } from './components/QRGenerator';
 import { RedirectHandler } from './components/RedirectHandler';
+import { ProfileSettings } from './components/ProfileSettings';
 import { 
   LogOut, 
   LayoutDashboard, 
@@ -17,30 +18,42 @@ import {
   Loader2,
   QrCode,
   AlertTriangle,
-  X
+  X,
+  PlusCircle
 } from 'lucide-react';
+
+import { FileViewer } from './components/FileViewer';
+import { BioPage } from './components/BioPage';
 
 const App: React.FC = () => {
   const [session, setSession] = useState<any>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const profileRef = React.useRef<UserProfile | null>(null);
+  const fetchingRef = React.useRef(false);
   const [profileError, setProfileError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [configError, setConfigError] = useState<string | null>(null);
-  const [view, setView] = useState<'dashboard' | 'generator'>('dashboard');
+  const [view, setView] = useState<'dashboard' | 'generator' | 'settings'>('dashboard');
   const navigate = useNavigate();
   const location = useLocation();
+
+  useEffect(() => {
+    profileRef.current = profile;
+  }, [profile]);
 
   useEffect(() => {
     let mounted = true;
 
     const initAuth = async () => {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
+        const sessionPromise = supabase.auth.getSession();
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Session timeout')), 10000));
+        const { data: { session } } = await Promise.race([sessionPromise, timeoutPromise]) as any;
         if (!mounted) return;
         
         setSession(session);
         if (session) {
-          await fetchProfile(session.user.id);
+          await fetchProfile(session.user.id, session.access_token);
         } else {
           setLoading(false);
         }
@@ -60,12 +73,12 @@ const App: React.FC = () => {
       setSession(session);
       if (session) {
         // Only set loading to true if we don't have a profile yet
-        if (!profile) {
+        if (!profileRef.current) {
           setLoading(true);
-          await fetchProfile(session.user.id);
+          await fetchProfile(session.user.id, session.access_token);
         } else if (event === 'SIGNED_IN') {
           // Refresh profile on explicit sign in
-          await fetchProfile(session.user.id);
+          await fetchProfile(session.user.id, session.access_token);
         }
       } else {
         setProfile(null);
@@ -80,10 +93,25 @@ const App: React.FC = () => {
     };
   }, []);
 
-  const fetchProfile = async (userId: string) => {
+  const fetchProfile = async (userId: string, token: string) => {
+    if (fetchingRef.current) return;
+    fetchingRef.current = true;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
     try {
       setProfileError(null);
-      const response = await fetch(`/api/profile/${userId}`);
+      // Use absolute URL to be safe in iframe context
+      const url = `${window.location.origin}/api/profile/${userId}`;
+      console.log(`[App] Fetching profile from: ${url}`);
+
+      const response = await fetch(url, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Accept': 'application/json'
+        },
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
       if (!response.ok) {
         let errorMsg = `Server error: ${response.status}`;
         try {
@@ -99,10 +127,14 @@ const App: React.FC = () => {
       const data = await response.json();
       setProfile(data);
     } catch (error: any) {
-      console.error('Error fetching profile:', error);
-      setProfileError(error.message);
+      clearTimeout(timeoutId);
+      console.error('[App] Error fetching profile:', error);
+      console.error('[App] Error name:', error.name);
+      console.error('[App] Error message:', error.message);
+      setProfileError(error.name === 'AbortError' ? 'Холболт салсан байна (Timeout)' : `Fetch error: ${error.message}`);
       setProfile(null);
     } finally {
+      fetchingRef.current = false;
       setLoading(false);
     }
   };
@@ -184,6 +216,22 @@ const App: React.FC = () => {
   }
   */
 
+  if (location.pathname.startsWith('/view/')) {
+    return (
+      <Routes>
+        <Route path="/view/:id" element={<FileViewer />} />
+      </Routes>
+    );
+  }
+
+  if (location.pathname.startsWith('/p/')) {
+    return (
+      <Routes>
+        <Route path="/p/:id" element={<BioPage />} />
+      </Routes>
+    );
+  }
+
   if (!session) {
     return <AuthView />;
   }
@@ -219,6 +267,33 @@ const App: React.FC = () => {
             </div>
             
             <div className="flex items-center gap-4">
+              <div className="flex items-center gap-1 mr-4">
+                <button 
+                  onClick={() => setView('dashboard')}
+                  className={`p-2 rounded-xl transition-all flex items-center gap-2 px-3 ${view === 'dashboard' ? 'bg-blue-50 text-blue-600' : 'text-slate-400 hover:bg-slate-50'}`}
+                  title="Хянах самбар"
+                >
+                  <LayoutDashboard size={20} />
+                  <span className="text-xs font-bold hidden md:block">Хянах самбар</span>
+                </button>
+                <button 
+                  onClick={() => setView('generator')}
+                  className={`p-2 rounded-xl transition-all flex items-center gap-2 px-3 ${view === 'generator' ? 'bg-blue-50 text-blue-600' : 'text-slate-400 hover:bg-slate-50'}`}
+                  title="Шинэ QR"
+                >
+                  <PlusCircle size={20} />
+                  <span className="text-xs font-bold hidden md:block">Шинэ QR</span>
+                </button>
+                <button 
+                  onClick={() => setView('settings')}
+                  className={`p-2 rounded-xl transition-all flex items-center gap-2 px-3 ${view === 'settings' ? 'bg-blue-50 text-blue-600' : 'text-slate-400 hover:bg-slate-50'}`}
+                  title="Тохиргоо"
+                >
+                  <Settings size={20} />
+                  <span className="text-xs font-bold hidden md:block">Тохиргоо</span>
+                </button>
+              </div>
+
               <div className="hidden md:flex flex-col items-end">
                 <span className="text-sm font-bold text-slate-900">{profile.email}</span>
                 <span className={`text-[10px] font-black uppercase px-1.5 py-0.5 rounded ${profile.role === 'admin' ? 'bg-purple-100 text-purple-600' : 'bg-blue-100 text-blue-600'}`}>
@@ -240,23 +315,25 @@ const App: React.FC = () => {
 
       {/* Main Content */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {profile.role === 'admin' ? (
-          <AdminDashboard profile={profile} />
-        ) : (
-          <>
-            {view === 'dashboard' ? (
-              <UserDashboard 
-                profile={profile} 
-                onNewQR={() => setView('generator')} 
-              />
-            ) : (
-              <QRGenerator 
-                user={profile} 
-                onBack={() => setView('dashboard')} 
-                onSaved={() => setView('dashboard')}
-              />
-            )}
-          </>
+        {view === 'dashboard' && (
+          profile.role === 'admin' ? (
+            <AdminDashboard profile={profile} />
+          ) : (
+            <UserDashboard 
+              profile={profile} 
+              onNewQR={() => setView('generator')} 
+            />
+          )
+        )}
+        {view === 'generator' && (
+          <QRGenerator 
+            user={profile} 
+            onBack={() => setView('dashboard')} 
+            onSaved={() => setView('dashboard')}
+          />
+        )}
+        {view === 'settings' && (
+          <ProfileSettings profile={profile} />
         )}
       </main>
 

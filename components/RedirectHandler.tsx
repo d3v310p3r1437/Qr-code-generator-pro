@@ -41,7 +41,11 @@ export const RedirectHandler: React.FC = () => {
           .eq('id', id);
 
         // Redirect
-        window.location.href = qr.target_url;
+        if (qr.type === 'bio') {
+          navigate(`/p/${id}`);
+        } else {
+          window.location.href = qr.target_url;
+        }
       } catch (err) {
         console.error(err);
         setError('Алдаа гарлаа. Дахин оролдоно уу.');

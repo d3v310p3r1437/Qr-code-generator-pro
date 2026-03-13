@@ -14,10 +14,16 @@ export const AuthView: React.FC = () => {
     setLoading(true);
     setError(null);
 
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) setError(error.message);
-    
-    setLoading(false);
+    try {
+      const loginPromise = supabase.auth.signInWithPassword({ email, password });
+      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Холболт салсан байна (Timeout)')), 15000));
+      const { error } = await Promise.race([loginPromise, timeoutPromise]) as any;
+      if (error) setError(error.message);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (

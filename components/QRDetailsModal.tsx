@@ -13,6 +13,7 @@ import {
   Loader2
 } from 'lucide-react';
 import { QRCodeData } from '../types';
+import { supabase } from '../services/supabaseClient';
 import { 
   LineChart, 
   Line, 
@@ -22,8 +23,14 @@ import {
   Tooltip, 
   ResponsiveContainer,
   AreaChart,
-  Area
+  Area,
+  PieChart,
+  Pie,
+  Cell,
+  Legend
 } from 'recharts';
+
+// ... existing code ...
 
 interface QRDetailsModalProps {
   qr: QRCodeData;
@@ -38,12 +45,24 @@ export const QRDetailsModal: React.FC<QRDetailsModalProps> = ({ qr, onClose }) =
   useEffect(() => {
     const fetchAnalytics = async () => {
       setLoading(true);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
       try {
-        const response = await fetch(`/api/qr-codes/${qr.id}/analytics`);
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token;
+
+        const response = await fetch(`/api/qr-codes/${qr.id}/analytics`, {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          },
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
         if (!response.ok) throw new Error('Failed to fetch analytics');
         const data = await response.json();
         setAnalytics(data);
       } catch (err) {
+        clearTimeout(timeoutId);
         console.error('Analytics error:', err);
       } finally {
         setLoading(false);
@@ -93,6 +112,28 @@ export const QRDetailsModal: React.FC<QRDetailsModalProps> = ({ qr, onClose }) =
 
   const chartData = processData();
   const isExpired = qr.expires_at && new Date(qr.expires_at) < new Date();
+
+  const getDeviceData = () => {
+    const counts: Record<string, number> = {};
+    analytics.forEach((log: any) => {
+      const type = log.device_type || 'desktop';
+      counts[type] = (counts[type] || 0) + 1;
+    });
+    return Object.entries(counts).map(([name, value]) => ({ name, value }));
+  };
+
+  const getOSData = () => {
+    const counts: Record<string, number> = {};
+    analytics.forEach((log: any) => {
+      const os = log.os_name || 'Unknown';
+      counts[os] = (counts[os] || 0) + 1;
+    });
+    return Object.entries(counts).map(([name, value]) => ({ name, value }));
+  };
+
+  const COLORS = ['#2563eb', '#7c3aed', '#db2777', '#ea580c', '#16a34a'];
+  const deviceData = getDeviceData();
+  const osData = getOSData();
 
   const handleDownload = async () => {
     if (!qr.qr_image_url) return;
@@ -203,7 +244,7 @@ export const QRDetailsModal: React.FC<QRDetailsModalProps> = ({ qr, onClose }) =
                     <span className="text-sm font-bold text-slate-600">Target URL</span>
                   </div>
                   <p className="text-xs text-slate-500 break-all font-mono bg-slate-50 p-2 rounded-lg border border-slate-100">
-                    {qr.target_url}
+                    {qr.type === 'file' ? 'Файл' : qr.target_url}
                   </p>
                 </div>
               </div>
@@ -296,6 +337,61 @@ export const QRDetailsModal: React.FC<QRDetailsModalProps> = ({ qr, onClose }) =
                   </div>
                 </div>
 
+                {/* New Analytics Charts */}
+                {!loading && analytics.length > 0 && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-8">
+                    <div className="bg-slate-50 rounded-3xl p-6 border border-slate-100">
+                      <h4 className="text-sm font-bold text-slate-700 mb-4">Төхөөрөмж</h4>
+                      <div className="h-[200px]">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
+                            <Pie
+                              data={deviceData}
+                              cx="50%"
+                              cy="50%"
+                              innerRadius={60}
+                              outerRadius={80}
+                              paddingAngle={5}
+                              dataKey="value"
+                            >
+                              {deviceData.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                              ))}
+                            </Pie>
+                            <Tooltip />
+                            <Legend verticalAlign="bottom" height={36} iconType="circle" />
+                          </PieChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+
+                    <div className="bg-slate-50 rounded-3xl p-6 border border-slate-100">
+                      <h4 className="text-sm font-bold text-slate-700 mb-4">Үйлдлийн систем</h4>
+                      <div className="h-[200px]">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
+                            <Pie
+                              data={osData}
+                              cx="50%"
+                              cy="50%"
+                              innerRadius={60}
+                              outerRadius={80}
+                              paddingAngle={5}
+                              dataKey="value"
+                            >
+                              {osData.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                              ))}
+                            </Pie>
+                            <Tooltip />
+                            <Legend verticalAlign="bottom" height={36} iconType="circle" />
+                          </PieChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {/* Recent Scans List */}
                 <div className="mt-8">
                   <h3 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
@@ -313,8 +409,8 @@ export const QRDetailsModal: React.FC<QRDetailsModalProps> = ({ qr, onClose }) =
                           <thead className="sticky top-0 bg-slate-100 text-slate-500 font-bold uppercase tracking-wider">
                             <tr>
                               <th className="px-4 py-2">Хэзээ</th>
-                              <th className="px-4 py-2">IP Хаяг</th>
-                              <th className="px-4 py-2">Төхөөрөмж</th>
+                              <th className="px-4 py-2">Байршил</th>
+                              <th className="px-4 py-2">Төхөөрөмж / OS</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100">
@@ -323,11 +419,17 @@ export const QRDetailsModal: React.FC<QRDetailsModalProps> = ({ qr, onClose }) =
                                 <td className="px-4 py-3 text-slate-600 whitespace-nowrap">
                                   {new Date(log.scanned_at).toLocaleString('mn-MN')}
                                 </td>
-                                <td className="px-4 py-3 text-slate-500 font-mono">
-                                  {log.ip_address || 'Unknown'}
+                                <td className="px-4 py-3 text-slate-500">
+                                  <div className="flex flex-col">
+                                    <span className="font-bold">{log.country || 'Unknown'}</span>
+                                    <span className="text-[10px] opacity-70">{log.city || 'Unknown'}</span>
+                                  </div>
                                 </td>
-                                <td className="px-4 py-3 text-slate-400 truncate max-w-[150px]" title={log.user_agent}>
-                                  {log.user_agent || 'Unknown'}
+                                <td className="px-4 py-3 text-slate-400">
+                                  <div className="flex flex-col">
+                                    <span className="capitalize">{log.device_type || 'desktop'}</span>
+                                    <span className="text-[10px] opacity-70">{log.os_name || 'Unknown'}</span>
+                                  </div>
                                 </td>
                               </tr>
                             ))}
