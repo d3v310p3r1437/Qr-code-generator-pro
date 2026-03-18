@@ -20,10 +20,11 @@ import {
   Download,
   Edit3
 } from 'lucide-react';
-import { UserProfile, QRCodeData } from '../types';
+import { UserProfile, QRCodeData, QRDataType } from '../types';
 import { QRGenerator } from './QRGenerator';
 import { QRDetailsModal } from './QRDetailsModal';
 import { EditQRModal } from './EditQRModal';
+import { EditUserModal } from './EditUserModal';
 
 export const AdminDashboard: React.FC<{ profile: UserProfile }> = ({ profile }) => {
   const [activeTab, setActiveTab] = useState<'users' | 'qrs' | 'create'>('qrs');
@@ -39,8 +40,10 @@ export const AdminDashboard: React.FC<{ profile: UserProfile }> = ({ profile }) 
   const [password, setPassword] = useState('');
   const [role, setRole] = useState<'admin' | 'user'>('user');
   const [qrLimit, setQrLimit] = useState(10);
+  const [allowedQrTypes, setAllowedQrTypes] = useState<QRDataType[]>(['url', 'text', 'wifi', 'file', 'bio', 'vcard', 'app', 'event']);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
 
   const fetchData = async () => {
     setLoading(true);
@@ -67,6 +70,10 @@ export const AdminDashboard: React.FC<{ profile: UserProfile }> = ({ profile }) 
     } catch (err: any) {
       clearTimeout(timeoutId);
       console.error('Fetch error:', err);
+      if (err.message?.includes('Refresh Token')) {
+        alert('Таны нэвтрэх хугацаа дууссан байна. Дахин нэвтэрнэ үү.');
+        await supabase.auth.signOut();
+      }
     } finally {
       setLoading(false);
     }
@@ -75,6 +82,37 @@ export const AdminDashboard: React.FC<{ profile: UserProfile }> = ({ profile }) 
   useEffect(() => {
     fetchData();
   }, [activeTab]);
+
+  const handleUpdateUser = async (id: string, data: Partial<UserProfile>) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+
+      const response = await fetch(`/api/admin/profiles/${id}`, {
+        method: 'PATCH',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(data),
+      });
+
+      if (!response.ok) {
+        const result = await response.json();
+        throw new Error(result.error || 'Хэрэглэгч шинэчлэхэд алдаа гарлаа');
+      }
+
+      setUsers(prev => prev.map(u => u.id === id ? { ...u, ...data } : u));
+      alert('Хэрэглэгч амжилттай шинэчлэгдлээ');
+    } catch (err: any) {
+      if (err.message?.includes('Refresh Token')) {
+        alert('Таны нэвтрэх хугацаа дууссан байна. Дахин нэвтэрнэ үү.');
+        await supabase.auth.signOut();
+      } else {
+        throw err;
+      }
+    }
+  };
 
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -91,7 +129,7 @@ export const AdminDashboard: React.FC<{ profile: UserProfile }> = ({ profile }) 
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({ email, password, role, qr_limit: qrLimit }),
+        body: JSON.stringify({ email, password, role, qr_limit: qrLimit, allowed_qr_types: allowedQrTypes }),
       });
 
       const result = await response.json();
@@ -101,10 +139,22 @@ export const AdminDashboard: React.FC<{ profile: UserProfile }> = ({ profile }) 
       setPassword('');
       setQrLimit(10);
       setRole('user');
-      fetchData();
+      setAllowedQrTypes(['url', 'text', 'wifi', 'file', 'bio', 'vcard', 'app', 'event']);
+      
+      if (activeTab === 'users') {
+        setUsers(prev => [result.user, ...prev]);
+      } else {
+        setActiveTab('users');
+      }
+      
       alert('Хэрэглэгч амжилттай бүртгэгдлээ');
     } catch (err: any) {
-      setError(err.message);
+      if (err.message?.includes('Refresh Token')) {
+        setError('Таны нэвтрэх хугацаа дууссан байна. Дахин нэвтэрнэ үү.');
+        await supabase.auth.signOut();
+      } else {
+        setError(err.message);
+      }
     } finally {
       setCreating(false);
     }
@@ -127,9 +177,14 @@ export const AdminDashboard: React.FC<{ profile: UserProfile }> = ({ profile }) 
         throw new Error(errData.error || 'Устгаж чадсангүй');
       }
 
-      fetchData();
+      setAllQrs(prev => prev.filter(qr => qr.id !== id));
     } catch (err: any) {
-      alert('Устгахад алдаа гарлаа: ' + err.message);
+      if (err.message?.includes('Refresh Token')) {
+        alert('Таны нэвтрэх хугацаа дууссан байна. Дахин нэвтэрнэ үү.');
+        await supabase.auth.signOut();
+      } else {
+        alert('Устгахад алдаа гарлаа: ' + err.message);
+      }
     }
   };
 
@@ -147,9 +202,14 @@ export const AdminDashboard: React.FC<{ profile: UserProfile }> = ({ profile }) 
         const errData = await response.json();
         throw new Error(errData.error || 'Хэрэглэгчийг устгаж чадсангүй');
       }
-      fetchData();
+      setUsers(prev => prev.filter(user => user.id !== id));
     } catch (err: any) {
-      alert('Алдаа: ' + err.message);
+      if (err.message?.includes('Refresh Token')) {
+        alert('Таны нэвтрэх хугацаа дууссан байна. Дахин нэвтэрнэ үү.');
+        await supabase.auth.signOut();
+      } else {
+        alert('Алдаа: ' + err.message);
+      }
     }
   };
 
@@ -187,7 +247,12 @@ export const AdminDashboard: React.FC<{ profile: UserProfile }> = ({ profile }) 
       alert(`${result.synced} QR кодын тоог амжилттай шинэчиллээ.`);
       fetchData();
     } catch (err: any) {
-      alert('Алдаа: ' + err.message);
+      if (err.message?.includes('Refresh Token')) {
+        alert('Таны нэвтрэх хугацаа дууссан байна. Дахин нэвтэрнэ үү.');
+        await supabase.auth.signOut();
+      } else {
+        alert('Алдаа: ' + err.message);
+      }
     } finally {
       setSyncing(false);
     }
@@ -275,12 +340,45 @@ export const AdminDashboard: React.FC<{ profile: UserProfile }> = ({ profile }) 
                   />
                 </div>
               </div>
-              <button
-                type="submit" disabled={creating}
-                className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-xl transition-all flex items-center justify-center gap-2 disabled:opacity-50 text-sm shadow-lg shadow-blue-100"
-              >
-                {creating ? <Loader2 className="animate-spin" size={18} /> : 'Бүртгэх'}
-              </button>
+              <div className="md:col-span-5 mt-2">
+                <label className="block text-xs font-bold text-slate-500 mb-2 uppercase ml-1">Зөвшөөрөгдсөн QR төрлүүд</label>
+                <div className="flex flex-wrap gap-3">
+                  {[
+                    { id: 'url', label: 'Холбоос' },
+                    { id: 'text', label: 'Текст' },
+                    { id: 'wifi', label: 'WiFi' },
+                    { id: 'file', label: 'Файл' },
+                    { id: 'bio', label: 'Bio Link' },
+                    { id: 'vcard', label: 'Нэрийн хуудас' },
+                    { id: 'app', label: 'Апп татах' },
+                    { id: 'event', label: 'Арга хэмжээ' }
+                  ].map(type => (
+                    <label key={type.id} className="flex items-center gap-2 cursor-pointer bg-slate-50 px-3 py-2 rounded-xl border border-slate-100 hover:bg-slate-100 transition-colors">
+                      <input 
+                        type="checkbox" 
+                        className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500"
+                        checked={allowedQrTypes.includes(type.id as any)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setAllowedQrTypes([...allowedQrTypes, type.id as any]);
+                          } else {
+                            setAllowedQrTypes(allowedQrTypes.filter(t => t !== type.id));
+                          }
+                        }}
+                      />
+                      <span className="text-sm font-medium text-slate-700">{type.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div className="md:col-span-5 flex justify-end">
+                <button
+                  type="submit" disabled={creating}
+                  className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-8 rounded-xl transition-all flex items-center justify-center gap-2 disabled:opacity-50 text-sm shadow-lg shadow-blue-100"
+                >
+                  {creating ? <Loader2 className="animate-spin" size={18} /> : 'Бүртгэх'}
+                </button>
+              </div>
             </form>
             {error && <p className="mt-4 text-red-500 text-xs font-medium">{error}</p>}
           </section>
@@ -302,14 +400,16 @@ export const AdminDashboard: React.FC<{ profile: UserProfile }> = ({ profile }) 
                     <th className="px-6 py-4">Имэйл</th>
                     <th className="px-6 py-4">Эрх</th>
                     <th className="px-6 py-4">QR Лимит</th>
+                    <th className="px-6 py-4">Зөвшөөрсөн QR</th>
+                    <th className="px-6 py-4">Хүчинтэй хугацаа</th>
                     <th className="px-6 py-4 text-right">Үйлдэл</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
                   {loading ? (
-                    <tr><td colSpan={4} className="px-6 py-12 text-center"><Loader2 className="animate-spin mx-auto text-slate-300" size={32} /></td></tr>
+                    <tr><td colSpan={6} className="px-6 py-12 text-center"><Loader2 className="animate-spin mx-auto text-slate-300" size={32} /></td></tr>
                   ) : users.length === 0 ? (
-                    <tr><td colSpan={4} className="px-6 py-12 text-center text-slate-400">Хэрэглэгч олдсонгүй.</td></tr>
+                    <tr><td colSpan={6} className="px-6 py-12 text-center text-slate-400">Хэрэглэгч олдсонгүй.</td></tr>
                   ) : (
                     users.map((u) => (
                       <tr key={u.id} className="hover:bg-slate-50/50 transition-colors">
@@ -337,13 +437,47 @@ export const AdminDashboard: React.FC<{ profile: UserProfile }> = ({ profile }) 
                             </div>
                           )}
                         </td>
+                        <td className="px-6 py-4 text-xs text-slate-500">
+                          {u.role === 'admin' ? (
+                            <span className="text-purple-600 font-bold">Бүгд</span>
+                          ) : (
+                            <div className="flex flex-wrap gap-1">
+                              {u.allowed_qr_types?.map(t => (
+                                <span key={t} className="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded text-[10px] uppercase font-bold">
+                                  {t}
+                                </span>
+                              )) || <span className="text-slate-400">Бүгд</span>}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 text-xs text-slate-500 font-mono">
+                          {u.role === 'admin' ? (
+                            <span className="text-purple-600 font-bold">Хугацаагүй</span>
+                          ) : u.expires_at ? (
+                            <span className={new Date(u.expires_at) < new Date() ? 'text-red-500 font-bold' : 'text-slate-700'}>
+                              {new Date(u.expires_at).toLocaleDateString()}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">Хугацаагүй</span>
+                          )}
+                        </td>
                         <td className="px-6 py-4 text-right">
-                          <button 
-                            onClick={() => handleDeleteUser(u.id)}
-                            className="text-slate-300 hover:text-red-500 transition-colors"
-                          >
-                            <Trash2 size={18} />
-                          </button>
+                          <div className="flex items-center justify-end gap-2">
+                            <button 
+                              onClick={() => setEditingUser(u)}
+                              className="text-slate-300 hover:text-blue-500 transition-colors p-1"
+                              title="Засах"
+                            >
+                              <Edit3 size={18} />
+                            </button>
+                            <button 
+                              onClick={() => handleDeleteUser(u.id)}
+                              className="text-slate-300 hover:text-red-500 transition-colors p-1"
+                              title="Устгах"
+                            >
+                              <Trash2 size={18} />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))
@@ -414,7 +548,7 @@ export const AdminDashboard: React.FC<{ profile: UserProfile }> = ({ profile }) 
                         </div>
                       </td>
                       <td className="px-6 py-4">
-                        <div className="text-xs text-slate-500 truncate max-w-[200px] font-mono" title={qr.type === 'file' ? 'Файл' : qr.target_url}>{qr.type === 'file' ? 'Файл' : qr.target_url}</div>
+                        <div className="text-xs text-slate-500 truncate max-w-[200px] font-mono" title={qr.type === 'file' ? 'Файл' : qr.type === 'vcard' ? 'Нэрийн хуудас' : qr.type === 'app' ? 'Апп татах' : qr.type === 'event' ? 'Арга хэмжээ' : qr.target_url}>{qr.type === 'file' ? 'Файл' : qr.type === 'vcard' ? 'Нэрийн хуудас' : qr.type === 'app' ? 'Апп татах' : qr.type === 'event' ? 'Арга хэмжээ' : qr.target_url}</div>
                         <button 
                           onClick={(e) => {
                             e.stopPropagation();
@@ -448,7 +582,7 @@ export const AdminDashboard: React.FC<{ profile: UserProfile }> = ({ profile }) 
                               <Download size={18} />
                             </button>
                           )}
-                          <a href={qr.type === 'file' ? `/view/${qr.id}` : qr.target_url} target="_blank" rel="noreferrer" className="p-2 text-slate-400 hover:text-blue-600 transition-colors" title="Нээх">
+                          <a href={qr.type === 'file' ? `/view/${qr.id}` : qr.type === 'bio' ? `/p/${qr.id}` : qr.type === 'vcard' || qr.type === 'app' || qr.type === 'event' ? `/r/${qr.id}` : qr.target_url} target="_blank" rel="noreferrer" className="p-2 text-slate-400 hover:text-blue-600 transition-colors" title="Нээх">
                             <ExternalLink size={18} />
                           </a>
                           <button 
@@ -495,10 +629,22 @@ export const AdminDashboard: React.FC<{ profile: UserProfile }> = ({ profile }) 
         <EditQRModal 
           qr={editingQR} 
           onClose={() => setEditingQR(null)} 
-          onSaved={() => {
-            fetchData();
+          onSaved={(updatedQR) => {
+            if (updatedQR) {
+              setAllQrs(prev => prev.map(q => q.id === updatedQR.id ? { ...q, ...updatedQR } : q));
+            } else {
+              fetchData();
+            }
             setEditingQR(null);
           }} 
+        />
+      )}
+
+      {editingUser && (
+        <EditUserModal
+          user={editingUser}
+          onClose={() => setEditingUser(null)}
+          onSave={handleUpdateUser}
         />
       )}
     </div>

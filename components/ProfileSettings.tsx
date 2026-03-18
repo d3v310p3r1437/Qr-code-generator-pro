@@ -35,7 +35,12 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile }) => 
       setNewPassword('');
       setConfirmPassword('');
     } catch (err: any) {
-      setMessage({ type: 'error', text: err.message });
+      if (err.message?.includes('Refresh Token')) {
+        setMessage({ type: 'error', text: 'Таны нэвтрэх хугацаа дууссан байна. Дахин нэвтэрнэ үү.' });
+        await supabase.auth.signOut();
+      } else {
+        setMessage({ type: 'error', text: err.message });
+      }
     } finally {
       setLoading(false);
     }

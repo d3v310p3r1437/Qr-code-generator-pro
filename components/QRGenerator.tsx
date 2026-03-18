@@ -114,6 +114,31 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
   const [bioImage, setBioImage] = useState<File | null>(null);
   const [bioImagePreview, setBioImagePreview] = useState<string>('');
   
+  const [vcardData, setVcardData] = useState({
+    firstName: '',
+    lastName: '',
+    organization: '',
+    title: '',
+    phone: '',
+    email: '',
+    website: '',
+    address: ''
+  });
+
+  const [appData, setAppData] = useState({
+    iosUrl: '',
+    androidUrl: '',
+    fallbackUrl: ''
+  });
+
+  const [eventData, setEventData] = useState({
+    title: '',
+    description: '',
+    location: '',
+    startDate: '',
+    endDate: ''
+  });
+  
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [expiresAt, setExpiresAt] = useState('');
@@ -122,6 +147,14 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
   const [loadingAI, setLoadingAI] = useState<boolean>(false);
   const [saving, setSaving] = useState(false);
   const [showBioPreview, setShowBioPreview] = useState(false);
+
+  useEffect(() => {
+    if (user.role !== 'admin' && user.allowed_qr_types && user.allowed_qr_types.length > 0) {
+      if (!user.allowed_qr_types.includes(activeTab)) {
+        setActiveTab(user.allowed_qr_types[0]);
+      }
+    }
+  }, [user.allowed_qr_types, user.role, activeTab]);
 
   const [config, setConfig] = useState<QRConfig>({
     value: 'https://google.com',
@@ -206,6 +239,9 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
     if (activeTab === 'wifi') return `WIFI:S:${wifi.ssid};T:${wifi.encryption};P:${wifi.password};;`;
     if (activeTab === 'file') return `${window.location.origin}/view/preview`;
     if (activeTab === 'bio') return `${window.location.origin}/p/preview`;
+    if (activeTab === 'app') return `${window.location.origin}/r/preview`;
+    if (activeTab === 'vcard') return `${window.location.origin}/r/preview`;
+    if (activeTab === 'event') return `${window.location.origin}/r/preview`;
     return '';
   };
 
@@ -229,6 +265,20 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
     if (activeTab === 'file' && !file) {
       alert('Файлаа оруулна уу');
       return;
+    }
+    if (activeTab === 'file' && file) {
+      const maxSize = 30 * 1024 * 1024; // 30MB
+      const blockedExtensions = ['.exe', '.zip', '.rar', '.bat', '.sh', '.bin', '.dll', '.msi'];
+      const fileExt = '.' + file.name.split('.').pop()?.toLowerCase();
+      
+      if (file.size > maxSize) {
+        alert('Файлын хэмжээ 30MB-аас ихгүй байх ёстой.');
+        return;
+      }
+      if (blockedExtensions.includes(fileExt)) {
+        alert('Энэ төрлийн файлыг хуулахыг хориглосон байна (.exe, .zip, .rar гэх мэт).');
+        return;
+      }
     }
     if (!title) {
       alert('Гарчиг оруулна уу');
@@ -300,7 +350,10 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
           type: activeTab,
           file_url: uploadedFileUrl || null,
           file_type: uploadedFileType || null,
-          bio_data: activeTab === 'bio' ? { ...bioData, profile_image_url: bioProfileUrl || bioData.profile_image_url } : null
+          bio_data: activeTab === 'bio' ? { ...bioData, profile_image_url: bioProfileUrl || bioData.profile_image_url } : 
+                    activeTab === 'vcard' ? vcardData :
+                    activeTab === 'app' ? appData :
+                    activeTab === 'event' ? eventData : null
         })
       });
 
@@ -319,8 +372,8 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
       const qrData = await response.json();
 
       // 2. Generate the QR code image blob
-      // Use redirect URL for 'url', 'file', and 'bio' types
-      const qrValue = (activeTab === 'url' || activeTab === 'file' || activeTab === 'bio') 
+      // Use redirect URL for 'url', 'file', 'bio', and 'app' types
+      const qrValue = (activeTab === 'url' || activeTab === 'file' || activeTab === 'bio' || activeTab === 'app' || activeTab === 'vcard' || activeTab === 'event') 
         ? `${window.location.origin}${activeTab === 'bio' ? '/p/' : '/r/'}${qrData.id}` 
         : targetUrl;
       
@@ -351,9 +404,9 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
           .from('qrcodes')
           .getPublicUrl(qrFileName);
 
-        // 5. Update DB with image URL and correct target_url for bio/file
+        // 5. Update DB with image URL and correct target_url for bio/file/app/vcard/event
         const updateData: any = { qr_image_url: publicUrl };
-        if (activeTab === 'bio' || activeTab === 'file') {
+        if (activeTab === 'bio' || activeTab === 'file' || activeTab === 'app' || activeTab === 'vcard' || activeTab === 'event') {
           updateData.target_url = qrValue;
         }
 
@@ -373,7 +426,13 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
       onSaved();
     } catch (err: any) {
       clearTimeout(timeoutId);
-      alert('Алдаа: ' + (err.name === 'AbortError' ? 'Холболт салсан байна (Timeout)' : err.message));
+      console.error('Save error:', err);
+      if (err.message?.includes('Refresh Token')) {
+        alert('Таны нэвтрэх хугацаа дууссан байна. Дахин нэвтэрнэ үү.');
+        await supabase.auth.signOut();
+      } else {
+        alert('Алдаа: ' + (err.name === 'AbortError' ? 'Холболт салсан байна (Timeout)' : err.message));
+      }
     } finally {
       setSaving(false);
     }
@@ -479,23 +538,26 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
           </section>
 
           {/* Tabs */}
-          <section className="bg-white p-2 rounded-2xl shadow-sm border border-slate-100 flex gap-2">
+          <section className="bg-white p-2 rounded-2xl shadow-sm border border-slate-100 grid grid-cols-2 sm:grid-cols-4 gap-2">
             {[
               { id: 'url', icon: LinkIcon, label: 'Вэб сайт' },
               { id: 'text', icon: FileText, label: 'Текст' },
               { id: 'wifi', icon: Wifi, label: 'Wi-Fi' },
               { id: 'file', icon: Upload, label: 'Файл/Зураг' },
               { id: 'bio', icon: Layout, label: 'Mini-Web' },
-            ].map(tab => (
+              { id: 'vcard', icon: User, label: 'Нэрийн хуудас' },
+              { id: 'app', icon: Monitor, label: 'App Store' },
+              { id: 'event', icon: Calendar, label: 'Арга хэмжээ' },
+            ].filter(tab => user.role === 'admin' || !user.allowed_qr_types || user.allowed_qr_types.includes(tab.id as QRDataType)).map(tab => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id as QRDataType)}
-                className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold transition-all ${
+                className={`flex items-center justify-center gap-2 py-3 px-2 rounded-xl font-bold transition-all text-xs sm:text-sm ${
                   activeTab === tab.id ? 'bg-blue-600 text-white shadow-md shadow-blue-100' : 'text-slate-500 hover:bg-slate-50'
                 }`}
               >
-                <tab.icon size={18} />
-                <span className="hidden sm:inline">{tab.label}</span>
+                <tab.icon size={16} className="shrink-0" />
+                <span className="truncate">{tab.label}</span>
               </button>
             ))}
           </section>
@@ -555,10 +617,27 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
                   className="hidden"
                   onChange={(e) => {
                     if (e.target.files && e.target.files[0]) {
-                      setFile(e.target.files[0]);
+                      const selectedFile = e.target.files[0];
+                      const maxSize = 30 * 1024 * 1024; // 30MB
+                      const blockedExtensions = ['.exe', '.zip', '.rar', '.bat', '.sh', '.bin', '.dll', '.msi'];
+                      const fileExt = '.' + selectedFile.name.split('.').pop()?.toLowerCase();
+                      
+                      if (selectedFile.size > maxSize) {
+                        alert('Файлын хэмжээ 30MB-аас ихгүй байх ёстой.');
+                        e.target.value = '';
+                        return;
+                      }
+                      
+                      if (blockedExtensions.includes(fileExt)) {
+                        alert('Энэ төрлийн файлыг хуулахыг хориглосон байна (.exe, .zip, .rar гэх мэт).');
+                        e.target.value = '';
+                        return;
+                      }
+                      
+                      setFile(selectedFile);
                     }
                   }}
-                  accept="image/*,video/*,application/pdf"
+                  accept="image/*,video/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/plain"
                 />
                 <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4">
                   <Upload size={32} />
@@ -739,6 +818,93 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
                     <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Товч текст</label>
                     <input type="color" value={bioData.button_text_color} onChange={(e) => setBioData({...bioData, button_text_color: e.target.value})} className="w-full h-10 rounded-lg cursor-pointer" />
                   </div>
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'vcard' && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-1 uppercase ml-1">Овог</label>
+                    <input type="text" value={vcardData.lastName} onChange={(e) => setVcardData({...vcardData, lastName: e.target.value})} className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-1 uppercase ml-1">Нэр</label>
+                    <input type="text" value={vcardData.firstName} onChange={(e) => setVcardData({...vcardData, firstName: e.target.value})} className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-1 uppercase ml-1">Байгууллага</label>
+                    <input type="text" value={vcardData.organization} onChange={(e) => setVcardData({...vcardData, organization: e.target.value})} className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-1 uppercase ml-1">Албан тушаал</label>
+                    <input type="text" value={vcardData.title} onChange={(e) => setVcardData({...vcardData, title: e.target.value})} className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-1 uppercase ml-1">Утас</label>
+                    <input type="tel" value={vcardData.phone} onChange={(e) => setVcardData({...vcardData, phone: e.target.value})} className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-1 uppercase ml-1">Имэйл</label>
+                    <input type="email" value={vcardData.email} onChange={(e) => setVcardData({...vcardData, email: e.target.value})} className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none" />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1 uppercase ml-1">Вэб сайт</label>
+                  <input type="url" value={vcardData.website} onChange={(e) => setVcardData({...vcardData, website: e.target.value})} className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1 uppercase ml-1">Хаяг</label>
+                  <input type="text" value={vcardData.address} onChange={(e) => setVcardData({...vcardData, address: e.target.value})} className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none" />
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'app' && (
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1 uppercase ml-1">iOS App Store URL</label>
+                  <input type="url" value={appData.iosUrl} onChange={(e) => setAppData({...appData, iosUrl: e.target.value})} placeholder="https://apps.apple.com/..." className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1 uppercase ml-1">Android Play Store URL</label>
+                  <input type="url" value={appData.androidUrl} onChange={(e) => setAppData({...appData, androidUrl: e.target.value})} placeholder="https://play.google.com/..." className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1 uppercase ml-1">Бусад үед (Fallback URL)</label>
+                  <input type="url" value={appData.fallbackUrl} onChange={(e) => setAppData({...appData, fallbackUrl: e.target.value})} placeholder="https://yourwebsite.com" className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none" />
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'event' && (
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1 uppercase ml-1">Арга хэмжээний нэр</label>
+                  <input type="text" value={eventData.title} onChange={(e) => setEventData({...eventData, title: e.target.value})} className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1 uppercase ml-1">Байршил</label>
+                  <input type="text" value={eventData.location} onChange={(e) => setEventData({...eventData, location: e.target.value})} className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none" />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-1 uppercase ml-1">Эхлэх огноо, цаг</label>
+                    <input type="datetime-local" value={eventData.startDate} onChange={(e) => setEventData({...eventData, startDate: e.target.value})} className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-1 uppercase ml-1">Дуусах огноо, цаг</label>
+                    <input type="datetime-local" value={eventData.endDate} onChange={(e) => setEventData({...eventData, endDate: e.target.value})} className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none" />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1 uppercase ml-1">Тайлбар</label>
+                  <textarea value={eventData.description} onChange={(e) => setEventData({...eventData, description: e.target.value})} rows={3} className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none resize-none" />
                 </div>
               </div>
             )}

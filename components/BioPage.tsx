@@ -2,7 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { QRCodeData } from '../types';
-import { supabase } from '../services/supabaseClient';
+import { supabase, publicSupabase } from '../services/supabaseClient';
 import { motion } from 'framer-motion';
 import { 
   Instagram, 
@@ -56,7 +56,7 @@ export const BioPage: React.FC = () => {
       }
 
       try {
-        const { data, error } = await supabase
+        const { data, error } = await publicSupabase
           .from('qr_codes')
           .select('*')
           .eq('id', id)
@@ -184,7 +184,7 @@ export const BioPage: React.FC = () => {
 
         {/* Links */}
         <div className="w-full space-y-4">
-          {bio_data.links.map((link, index) => {
+          {bio_data.links.map((link: any, index: number) => {
             const Icon = ICON_MAP[link.icon || 'globe'] || Globe;
             
             // Format URL
@@ -193,6 +193,18 @@ export const BioPage: React.FC = () => {
               href = `mailto:${href}`;
             } else if (link.icon === 'phone' && !href.startsWith('tel:')) {
               href = `tel:${href.replace(/\s/g, '')}`;
+            } else if (link.icon === 'facebook' && !href.includes('facebook.com') && !/^https?:\/\//i.test(href)) {
+              href = `https://facebook.com/${href}`;
+            } else if (link.icon === 'instagram' && !href.includes('instagram.com') && !/^https?:\/\//i.test(href)) {
+              href = `https://instagram.com/${href}`;
+            } else if (link.icon === 'twitter' && !href.includes('twitter.com') && !href.includes('x.com') && !/^https?:\/\//i.test(href)) {
+              href = `https://twitter.com/${href}`;
+            } else if (link.icon === 'linkedin' && !href.includes('linkedin.com') && !/^https?:\/\//i.test(href)) {
+              href = `https://linkedin.com/in/${href}`;
+            } else if (link.icon === 'github' && !href.includes('github.com') && !/^https?:\/\//i.test(href)) {
+              href = `https://github.com/${href}`;
+            } else if (link.icon === 'youtube' && !href.includes('youtube.com') && !/^https?:\/\//i.test(href)) {
+              href = `https://youtube.com/@${href}`;
             } else if (link.icon !== 'mail' && link.icon !== 'phone' && !/^https?:\/\//i.test(href)) {
               href = `https://${href}`;
             }
@@ -217,10 +229,10 @@ export const BioPage: React.FC = () => {
                 <div className="p-2 rounded-xl bg-black/5 mr-4 group-hover:bg-black/10 transition-colors">
                   <Icon size={20} />
                 </div>
-                <div className="flex-1 flex flex-col">
-                  <span className="font-bold text-sm">{link.label}</span>
+                <div className="flex-1 flex items-center gap-2 overflow-hidden">
+                  <span className="font-bold text-sm whitespace-nowrap">{link.label}</span>
                   {(link.icon === 'mail' || link.icon === 'phone') && link.url && (
-                    <span className="text-[10px] opacity-50 font-medium">{link.url}</span>
+                    <span className="text-xs opacity-70 font-medium truncate">{link.url}</span>
                   )}
                 </div>
                 <ExternalLink size={16} className="opacity-30 group-hover:opacity-100 transition-opacity" />

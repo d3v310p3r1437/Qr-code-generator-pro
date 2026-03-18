@@ -52,6 +52,10 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({ profile, onNewQR }
     } catch (err: any) {
       clearTimeout(timeoutId);
       console.error('Fetch error:', err);
+      if (err.message?.includes('Refresh Token')) {
+        alert('Таны нэвтрэх хугацаа дууссан байна. Дахин нэвтэрнэ үү.');
+        await supabase.auth.signOut();
+      }
     } finally {
       setLoading(false);
     }
@@ -80,9 +84,14 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({ profile, onNewQR }
         throw new Error(errData.error || 'Устгаж чадсангүй');
       }
 
-      fetchQRs();
+      setQrs(prev => prev.filter(qr => qr.id !== id));
     } catch (err: any) {
-      alert('Устгахад алдаа гарлаа: ' + err.message);
+      if (err.message?.includes('Refresh Token')) {
+        alert('Таны нэвтрэх хугацаа дууссан байна. Дахин нэвтэрнэ үү.');
+        await supabase.auth.signOut();
+      } else {
+        alert('Устгахад алдаа гарлаа: ' + err.message);
+      }
     }
   };
 
@@ -238,8 +247,8 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({ profile, onNewQR }
                   </div>
                 </div>
                 <div className="bg-slate-50 p-4 flex items-center justify-between gap-2" onClick={(e) => e.stopPropagation()}>
-                  <div className="flex items-center gap-2 text-[10px] font-bold text-slate-400 uppercase truncate max-w-[150px]" title={qr.type === 'file' ? 'Файл' : qr.target_url}>
-                    <QrCode size={12} /> {qr.type === 'file' ? 'Файл' : qr.target_url}
+                  <div className="flex items-center gap-2 text-[10px] font-bold text-slate-400 uppercase truncate max-w-[150px]" title={qr.type === 'file' ? 'Файл' : qr.type === 'vcard' ? 'Нэрийн хуудас' : qr.type === 'app' ? 'Апп татах' : qr.type === 'event' ? 'Арга хэмжээ' : qr.target_url}>
+                    <QrCode size={12} /> {qr.type === 'file' ? 'Файл' : qr.type === 'vcard' ? 'Нэрийн хуудас' : qr.type === 'app' ? 'Апп татах' : qr.type === 'event' ? 'Арга хэмжээ' : qr.target_url}
                   </div>
                   <div className="flex items-center gap-3 shrink-0">
                     <button 
@@ -263,7 +272,7 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({ profile, onNewQR }
                       </button>
                     )}
                     <a 
-                      href={qr.type === 'file' ? `/view/${qr.id}` : qr.target_url} 
+                      href={qr.type === 'file' ? `/view/${qr.id}` : qr.type === 'bio' ? `/p/${qr.id}` : qr.type === 'vcard' || qr.type === 'app' || qr.type === 'event' ? `/r/${qr.id}` : qr.target_url} 
                       target="_blank" 
                       rel="noreferrer"
                       className="text-blue-600 hover:text-blue-700 transition-colors"
@@ -289,8 +298,12 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({ profile, onNewQR }
         <EditQRModal 
           qr={editingQR} 
           onClose={() => setEditingQR(null)} 
-          onSaved={() => {
-            fetchQRs();
+          onSaved={(updatedQR) => {
+            if (updatedQR) {
+              setQrs(prev => prev.map(q => q.id === updatedQR.id ? { ...q, ...updatedQR } : q));
+            } else {
+              fetchQRs();
+            }
             setEditingQR(null);
           }} 
         />

@@ -13,7 +13,25 @@ const getSupabaseClient = () => {
   return createClient(supabaseUrl, supabaseAnonKey);
 };
 
+const getPublicSupabaseClient = () => {
+  const supabaseUrl = (import.meta as any).env.VITE_SUPABASE_URL;
+  const supabaseAnonKey = (import.meta as any).env.VITE_SUPABASE_ANON_KEY;
+
+  if (!supabaseUrl || !supabaseAnonKey) {
+    throw new Error('Supabase URL and Anon Key are required. Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in Settings.');
+  }
+
+  return createClient(supabaseUrl, supabaseAnonKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false
+    }
+  });
+};
+
 let instance: any = null;
+let publicInstance: any = null;
 
 // Use a Proxy to lazily initialize the Supabase client only when it's first accessed.
 // This prevents the app from crashing on boot if the environment variables are missing.
@@ -24,5 +42,15 @@ export const supabase = new Proxy({} as any, {
     }
     const value = instance[prop];
     return typeof value === 'function' ? value.bind(instance) : value;
+  }
+});
+
+export const publicSupabase = new Proxy({} as any, {
+  get(target, prop) {
+    if (!publicInstance) {
+      publicInstance = getPublicSupabaseClient();
+    }
+    const value = publicInstance[prop];
+    return typeof value === 'function' ? value.bind(publicInstance) : value;
   }
 });

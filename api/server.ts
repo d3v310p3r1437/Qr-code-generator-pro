@@ -5,6 +5,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { UAParser } from 'ua-parser-js';
+import rateLimit from 'express-rate-limit';
 
 dotenv.config();
 
@@ -15,7 +16,17 @@ const app = express();
 const PORT = parseInt(process.env.PORT || '3000', 10);
 
 // Trust proxy to get real client IP behind Nginx/Cloud Run
-app.set('trust proxy', true);
+// Setting to 1 instead of true to avoid express-rate-limit ValidationError
+app.set('trust proxy', 1);
+
+// Rate limiting for scan and redirect endpoints
+const scanLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 30, // Limit each IP to 30 requests per `window` (here, per 1 minute)
+  message: { error: 'Хэт олон хандалт хийсэн байна. Түр хүлээнэ үү.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 // Simple in-memory cache to prevent double-logging from the same IP within a short window
 const recentScans = new Map<string, number>();
@@ -31,36 +42,8 @@ setInterval(() => {
   }
 }, CLEANUP_INTERVAL);
 
-// Scan count buffer to prevent race conditions
-const scanCountBuffer = new Map<string, number>();
-const FLUSH_INTERVAL = 5000; // 5 seconds
-
-setInterval(async () => {
-  if (scanCountBuffer.size === 0) return;
-  
-  const admin = getSupabaseAdmin();
-  if (!admin) return;
-
-  const updates = Array.from(scanCountBuffer.entries());
-  scanCountBuffer.clear();
-
-  for (const [id, countToAdd] of updates) {
-    try {
-      const { data: latestQR } = await admin.from('qr_codes').select('scan_count').eq('id', id).single();
-      const currentCount = latestQR?.scan_count || 0;
-      
-      await admin.from('qr_codes')
-        .update({ scan_count: currentCount + countToAdd })
-        .eq('id', id);
-    } catch (err) {
-      console.error(`[Buffer] Failed to update scan count for ${id}:`, err);
-      scanCountBuffer.set(id, (scanCountBuffer.get(id) || 0) + countToAdd);
-    }
-  }
-}, FLUSH_INTERVAL);
-
 // Increase payload limit for large QR logos
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '30mb' }));
 
 // Custom JSON error handler for malformed JSON
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -199,7 +182,7 @@ apiRouter.post('/admin/create-user', requireAuth, requireAdmin, async (req, res)
     return res.status(500).json({ error: 'Supabase Admin client not configured' });
   }
 
-  const { email, password, role, qr_limit } = req.body;
+  const { email, password, role, qr_limit, allowed_qr_types } = req.body;
 
   try {
     const { data: authData, error: authError } = await admin.auth.admin.createUser({
@@ -211,14 +194,20 @@ apiRouter.post('/admin/create-user', requireAuth, requireAdmin, async (req, res)
     if (authError) throw authError;
     if (!authData.user) throw new Error('Failed to create user');
 
+    const profileData: any = {
+      id: authData.user.id,
+      email,
+      role: role || 'user',
+      qr_limit: role === 'admin' ? 999999 : (qr_limit || 10)
+    };
+
+    if (allowed_qr_types) {
+      profileData.allowed_qr_types = allowed_qr_types;
+    }
+
     const { error: profileError } = await admin
       .from('profiles')
-      .upsert({
-        id: authData.user.id,
-        email,
-        role: role || 'user',
-        qr_limit: role === 'admin' ? 999999 : (qr_limit || 10)
-      });
+      .upsert(profileData);
 
     if (profileError) throw profileError;
 
@@ -319,6 +308,20 @@ apiRouter.post('/qr-codes', requireAuth, async (req, res) => {
   const admin = getSupabaseAdmin();
   if (!admin) return res.status(500).json({ error: 'Supabase Admin client not configured' });
   try {
+    const user = (req as any).user;
+    const { data: profile } = await admin.from('profiles').select('role, allowed_qr_types, expires_at').eq('id', user.id).single();
+    
+    if (profile && profile.role !== 'admin') {
+      if (profile.expires_at && new Date(profile.expires_at) < new Date()) {
+        return res.status(403).json({ error: 'Your account has expired. Please contact the administrator.' });
+      }
+      if (profile.allowed_qr_types && profile.allowed_qr_types.length > 0) {
+        if (!profile.allowed_qr_types.includes(req.body.type)) {
+          return res.status(403).json({ error: 'You are not allowed to create this type of QR code.' });
+        }
+      }
+    }
+
     const { data, error } = await admin.from('qr_codes').insert(req.body).select().single();
     if (error) throw error;
     res.json(data);
@@ -387,6 +390,33 @@ apiRouter.delete('/qr-codes/:id', requireAuth, async (req, res) => {
   }
 });
 
+// Update Profile
+apiRouter.patch('/admin/profiles/:id', requireAuth, requireAdmin, async (req, res) => {
+  const admin = getSupabaseAdmin();
+  if (!admin) return res.status(500).json({ error: 'Supabase Admin client not configured' });
+  const { id } = req.params;
+  const { qr_limit, allowed_qr_types, expires_at } = req.body;
+
+  try {
+    const updateData: any = {};
+    if (qr_limit !== undefined) updateData.qr_limit = qr_limit;
+    if (allowed_qr_types !== undefined) updateData.allowed_qr_types = allowed_qr_types;
+    if (expires_at !== undefined) updateData.expires_at = expires_at;
+
+    const { data, error } = await admin
+      .from('profiles')
+      .update(updateData)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) throw error;
+    res.json({ success: true, profile: data });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Delete Profile
 apiRouter.delete('/admin/profiles/:id', requireAuth, requireAdmin, async (req, res) => {
   const admin = getSupabaseAdmin();
@@ -423,7 +453,7 @@ apiRouter.get('/qr-codes/:id/analytics', requireAuth, async (req, res) => {
   try {
     const { data, error } = await admin
       .from('scan_logs')
-      .select('scanned_at, ip_address, user_agent')
+      .select('scanned_at, ip_address, user_agent, device_type, os_name, browser_name, country, city')
       .eq('qr_code_id', id)
       .order('scanned_at', { ascending: true });
     
@@ -498,35 +528,113 @@ apiRouter.get('/public/qr-codes/:id', async (req, res) => {
   }
 });
 
+// Simple in-memory cache for Geo IP lookups to avoid hitting rate limits
+const geoCache = new Map<string, { country: string, city: string, timestamp: number }>();
+const GEO_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
+
+// Helper to clean IP address
+function cleanIP(ip: any): string {
+  if (!ip || typeof ip !== 'string') return '0.0.0.0';
+  let cleaned = ip.split(',')[0].trim();
+  if (cleaned.startsWith('::ffff:')) {
+    cleaned = cleaned.substring(7);
+  }
+  return cleaned;
+}
+
 // Track scan for Mini-Web (Bio) pages
-apiRouter.post('/scan/:id', async (req, res) => {
+apiRouter.post('/scan/:id', scanLimiter, async (req, res) => {
   const { id } = req.params;
   const admin = getSupabaseAdmin();
   if (!admin) return res.status(500).json({ error: 'Server configuration error' });
   
   try {
-    const { data: qr, error: fetchError } = await admin.from('qr_codes').select('scan_count').eq('id', id).single();
-    if (fetchError || !qr) return res.status(404).json({ error: 'QR code not found' });
+    // Try to use RPC for atomic increment, fallback to standard update
+    const { error: rpcError } = await admin.rpc('increment_scan_count', { qr_id: id });
+    if (rpcError) {
+      const { data: qr, error: fetchError } = await admin.from('qr_codes').select('scan_count').eq('id', id).single();
+      if (fetchError || !qr) return res.status(404).json({ error: 'QR code not found' });
+      await admin.from('qr_codes').update({ scan_count: (qr.scan_count || 0) + 1 }).eq('id', id);
+    }
 
-    await admin.from('qr_codes').update({ scan_count: (qr.scan_count || 0) + 1 }).eq('id', id);
-
-    const ip = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+    const rawIp = req.headers['x-forwarded-for'] || req.ip || req.socket.remoteAddress;
+    const ip = cleanIP(rawIp);
     const userAgent = req.headers['user-agent'];
     
     const scanLogData: any = { 
       qr_code_id: id,
-      ip_address: Array.isArray(ip) ? ip[0] : (typeof ip === 'string' ? ip.split(',')[0].trim() : ip),
+      ip_address: ip,
       user_agent: userAgent
     };
 
     if (userAgent) {
       const parser = new UAParser(userAgent as string);
-      const device = parser.getDevice();
-      const os = parser.getOS();
-      const browser = parser.getBrowser();
-      scanLogData.device_type = device.type || 'desktop';
-      scanLogData.os_name = os.name || 'Unknown';
-      scanLogData.browser_name = browser.name || 'Unknown';
+      const result = parser.getResult();
+      scanLogData.device_type = result.device.type || 'desktop';
+      scanLogData.os_name = result.os.name || 'Unknown';
+      scanLogData.browser_name = result.browser.name || 'Unknown';
+    }
+
+    // Get Location
+    if (scanLogData.ip_address && scanLogData.ip_address !== '::1' && scanLogData.ip_address !== '127.0.0.1' && !scanLogData.ip_address.startsWith('10.') && !scanLogData.ip_address.startsWith('192.168.')) {
+      const cachedGeo = geoCache.get(scanLogData.ip_address);
+      if (cachedGeo && Date.now() - cachedGeo.timestamp < GEO_CACHE_TTL) {
+        scanLogData.country = cachedGeo.country;
+        scanLogData.city = cachedGeo.city;
+      } else {
+        try {
+          const fetchFn = (globalThis as any).fetch;
+          if (typeof fetchFn === 'function') {
+            // 1. Try ipapi.co
+            try {
+              const geoRes = await fetchFn(`https://ipapi.co/${scanLogData.ip_address}/json/`);
+              if (geoRes.ok) {
+                const geoData = await geoRes.json();
+                if (!geoData.error) {
+                  scanLogData.country = geoData.country_name || 'Unknown';
+                  scanLogData.city = geoData.city || 'Unknown';
+                }
+              }
+            } catch (e) { /* ignore */ }
+            
+            // 2. Try ipinfo.io if still unknown
+            if (!scanLogData.country || scanLogData.country === 'Unknown') {
+              try {
+                const infoRes = await fetchFn(`https://ipinfo.io/${scanLogData.ip_address}/json`);
+                if (infoRes.ok) {
+                  const infoData = await infoRes.json();
+                  scanLogData.country = infoData.country || 'Unknown';
+                  scanLogData.city = infoData.city || 'Unknown';
+                }
+              } catch (e) { /* ignore */ }
+            }
+
+            // 3. Fallback to ip-api.com if still unknown
+            if (!scanLogData.country || scanLogData.country === 'Unknown') {
+              try {
+                const fallbackRes = await fetchFn(`http://ip-api.com/json/${scanLogData.ip_address}`);
+                if (fallbackRes.ok) {
+                  const fallbackData = await fallbackRes.json();
+                  if (fallbackData.status === 'success') {
+                    scanLogData.country = fallbackData.country || 'Unknown';
+                    scanLogData.city = fallbackData.city || 'Unknown';
+                  }
+                }
+              } catch (e) { /* ignore */ }
+            }
+
+            if (scanLogData.country && scanLogData.country !== 'Unknown') {
+              geoCache.set(scanLogData.ip_address, {
+                country: scanLogData.country,
+                city: scanLogData.city || 'Unknown',
+                timestamp: Date.now()
+              });
+            }
+          }
+        } catch (e) {
+          console.error('[Scan] Geo lookup error:', e);
+        }
+      }
     }
 
     await admin.from('scan_logs').insert(scanLogData).catch(console.error);
@@ -541,7 +649,7 @@ app.use('/api', apiRouter);
 
 // QR Redirect (outside /api)
 // This handles the short URLs like /r/123
-app.get('/r/:id', async (req, res, next) => {
+app.get('/r/:id', scanLimiter, async (req, res, next) => {
   const { id } = req.params;
   const admin = getSupabaseAdmin();
   if (!admin) return res.status(500).send('Server configuration error');
@@ -557,7 +665,8 @@ app.get('/r/:id', async (req, res, next) => {
     }
 
     // Increment scan count and log scan asynchronously
-    const ip = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+    const rawIp = req.headers['x-forwarded-for'] || req.ip || req.socket.remoteAddress;
+    const ip = cleanIP(rawIp);
     const userAgent = req.headers['user-agent'];
     const purpose = req.headers['purpose'] || req.headers['sec-purpose'];
     
@@ -585,38 +694,83 @@ app.get('/r/:id', async (req, res, next) => {
 
     const scanLogData: any = { 
       qr_code_id: id,
-      ip_address: Array.isArray(ip) ? ip[0] : (typeof ip === 'string' ? ip.split(',')[0].trim() : ip),
+      ip_address: ip,
       user_agent: userAgent
     };
 
     // Parse User Agent
     if (userAgent) {
       const parser = new UAParser(userAgent as string);
-      const device = parser.getDevice();
-      const os = parser.getOS();
-      const browser = parser.getBrowser();
+      const result = parser.getResult();
       
-      scanLogData.device_type = device.type || 'desktop';
-      scanLogData.os_name = os.name || 'Unknown';
-      scanLogData.browser_name = browser.name || 'Unknown';
+      scanLogData.device_type = result.device.type || 'desktop';
+      scanLogData.os_name = result.os.name || 'Unknown';
+      scanLogData.browser_name = result.browser.name || 'Unknown';
     }
 
     // Get Location (Simple IP-based lookup)
     const fetchLocation = async () => {
       try {
         const ipToLookup = scanLogData.ip_address;
-        if (ipToLookup && ipToLookup !== '::1' && ipToLookup !== '127.0.0.1') {
+        if (ipToLookup && ipToLookup !== '::1' && ipToLookup !== '127.0.0.1' && !ipToLookup.startsWith('10.') && !ipToLookup.startsWith('192.168.')) {
+          const cachedGeo = geoCache.get(ipToLookup);
+          if (cachedGeo && Date.now() - cachedGeo.timestamp < GEO_CACHE_TTL) {
+            scanLogData.country = cachedGeo.country;
+            scanLogData.city = cachedGeo.city;
+            return;
+          }
+
           // Use globalThis.fetch if available (Node 18+) or fallback
           const fetchFn = (globalThis as any).fetch;
           if (typeof fetchFn === 'function') {
-            const geoRes = await fetchFn(`https://ipapi.co/${ipToLookup}/json/`);
-            if (geoRes.ok) {
-              const geoData = await geoRes.json();
-              scanLogData.country = geoData.country_name || 'Unknown';
-              scanLogData.city = geoData.city || 'Unknown';
+            // 1. Try ipapi.co (HTTPS)
+            try {
+              const geoRes = await fetchFn(`https://ipapi.co/${ipToLookup}/json/`);
+              if (geoRes.ok) {
+                const geoData = await geoRes.json();
+                if (!geoData.error) {
+                  scanLogData.country = geoData.country_name || 'Unknown';
+                  scanLogData.city = geoData.city || 'Unknown';
+                  console.log(`[Redirect] ipapi.co success for ${ipToLookup}: ${scanLogData.country}`);
+                  geoCache.set(ipToLookup, { country: scanLogData.country, city: scanLogData.city, timestamp: Date.now() });
+                  return;
+                }
+              }
+            } catch (e) {
+              console.warn('[Redirect] ipapi.co failed');
             }
-          } else {
-            console.warn('[Redirect] fetch is not defined in this environment');
+
+            // 2. Try ipinfo.io (HTTPS) - Free tier works without token for limited requests
+            try {
+              const geoRes = await fetchFn(`https://ipinfo.io/${ipToLookup}/json`);
+              if (geoRes.ok) {
+                const geoData = await geoRes.json();
+                scanLogData.country = geoData.country || 'Unknown'; // Note: ipinfo returns country code (e.g. MN)
+                scanLogData.city = geoData.city || 'Unknown';
+                console.log(`[Redirect] ipinfo.io success for ${ipToLookup}: ${scanLogData.country}`);
+                geoCache.set(ipToLookup, { country: scanLogData.country, city: scanLogData.city, timestamp: Date.now() });
+                return;
+              }
+            } catch (e) {
+              console.warn('[Redirect] ipinfo.io failed');
+            }
+
+            // 3. Fallback to ip-api.com
+            try {
+              const geoRes = await fetchFn(`http://ip-api.com/json/${ipToLookup}`);
+              if (geoRes.ok) {
+                const geoData = await geoRes.json();
+                if (geoData.status === 'success') {
+                  scanLogData.country = geoData.country || 'Unknown';
+                  scanLogData.city = geoData.city || 'Unknown';
+                  console.log(`[Redirect] ip-api.com success for ${ipToLookup}: ${scanLogData.country}`);
+                  geoCache.set(ipToLookup, { country: scanLogData.country, city: scanLogData.city, timestamp: Date.now() });
+                  return;
+                }
+              }
+            } catch (e) {
+              console.error('[Redirect] ip-api.com error:', e);
+            }
           }
         }
       } catch (e) {
@@ -628,13 +782,16 @@ app.get('/r/:id', async (req, res, next) => {
     // Note: Still not perfectly atomic without RPC, but better than using the stale 'qr' object
     const updateScanCount = async () => {
       try {
-        // Fetch current count directly from DB to minimize race condition window
-        const { data: latestQR } = await admin.from('qr_codes').select('scan_count').eq('id', id).single();
-        const currentCount = latestQR?.scan_count || 0;
-        
-        await admin.from('qr_codes')
-          .update({ scan_count: currentCount + 1 })
-          .eq('id', id);
+        const { error: rpcError } = await admin.rpc('increment_scan_count', { qr_id: id });
+        if (rpcError) {
+          // Fetch current count directly from DB to minimize race condition window
+          const { data: latestQR } = await admin.from('qr_codes').select('scan_count').eq('id', id).single();
+          const currentCount = latestQR?.scan_count || 0;
+          
+          await admin.from('qr_codes')
+            .update({ scan_count: currentCount + 1 })
+            .eq('id', id);
+        }
       } catch (err) {
         console.error(`[Redirect] Failed to increment scan count for ${id}:`, err);
       }
@@ -672,6 +829,49 @@ app.get('/r/:id', async (req, res, next) => {
 
     if (qr.type === 'bio') {
       return res.redirect(`/p/${id}`);
+    }
+
+    if (qr.type === 'app' && qr.bio_data) {
+      const isIOS = /iPad|iPhone|iPod/.test(userAgent || '');
+      const isAndroid = /android/i.test(userAgent || '');
+      const appData = qr.bio_data as any;
+      
+      if (isIOS && appData.iosUrl) {
+        return res.redirect(appData.iosUrl);
+      } else if (isAndroid && appData.androidUrl) {
+        return res.redirect(appData.androidUrl);
+      } else if (appData.fallbackUrl) {
+        return res.redirect(appData.fallbackUrl);
+      } else {
+        return res.status(404).send('App URL not found for your device.');
+      }
+    }
+
+    if (qr.type === 'vcard') {
+      if (qr.bio_data) {
+        const vcardData = qr.bio_data as any;
+        const vcardString = `BEGIN:VCARD\nVERSION:3.0\nN:${vcardData.lastName || ''};${vcardData.firstName || ''};;;\nFN:${vcardData.firstName || ''} ${vcardData.lastName || ''}\nORG:${vcardData.organization || ''}\nTITLE:${vcardData.title || ''}\nTEL;TYPE=WORK,VOICE:${vcardData.phone || ''}\nEMAIL;TYPE=PREF,INTERNET:${vcardData.email || ''}\nURL:${vcardData.website || ''}\nADR;TYPE=WORK:;;${vcardData.address || ''};;;;\nEND:VCARD`;
+        res.setHeader('Content-Type', 'text/vcard');
+        res.setHeader('Content-Disposition', `attachment; filename="contact.vcf"`);
+        return res.send(vcardString);
+      } else {
+        return res.status(404).send('vCard data not found.');
+      }
+    }
+
+    if (qr.type === 'event') {
+      if (qr.bio_data) {
+        const eventData = qr.bio_data as any;
+        const formatDT = (dt: string) => dt ? dt.replace(/[-:]/g, '').replace(/\.\d{3}/, '') + 'Z' : '';
+        const start = formatDT(eventData.startDate ? new Date(eventData.startDate).toISOString() : '');
+        const end = formatDT(eventData.endDate ? new Date(eventData.endDate).toISOString() : '');
+        const eventString = `BEGIN:VCALENDAR\nVERSION:2.0\nBEGIN:VEVENT\nSUMMARY:${eventData.title || ''}\nDESCRIPTION:${eventData.description || ''}\nLOCATION:${eventData.location || ''}\nDTSTART:${start}\nDTEND:${end}\nEND:VEVENT\nEND:VCALENDAR`;
+        res.setHeader('Content-Type', 'text/calendar');
+        res.setHeader('Content-Disposition', `attachment; filename="event.ics"`);
+        return res.send(eventString);
+      } else {
+        return res.status(404).send('Event data not found.');
+      }
     }
 
     res.redirect(qr.target_url);

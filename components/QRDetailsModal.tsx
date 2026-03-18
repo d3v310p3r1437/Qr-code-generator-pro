@@ -244,7 +244,7 @@ export const QRDetailsModal: React.FC<QRDetailsModalProps> = ({ qr, onClose }) =
                     <span className="text-sm font-bold text-slate-600">Target URL</span>
                   </div>
                   <p className="text-xs text-slate-500 break-all font-mono bg-slate-50 p-2 rounded-lg border border-slate-100">
-                    {qr.type === 'file' ? 'Файл' : qr.target_url}
+                    {qr.type === 'file' ? 'Файл' : qr.type === 'vcard' ? 'Нэрийн хуудас' : qr.type === 'app' ? 'Апп татах' : qr.type === 'event' ? 'Арга хэмжээ' : qr.target_url}
                   </p>
                 </div>
               </div>
@@ -409,8 +409,8 @@ export const QRDetailsModal: React.FC<QRDetailsModalProps> = ({ qr, onClose }) =
                           <thead className="sticky top-0 bg-slate-100 text-slate-500 font-bold uppercase tracking-wider">
                             <tr>
                               <th className="px-4 py-2">Хэзээ</th>
-                              <th className="px-4 py-2">Байршил</th>
-                              <th className="px-4 py-2">Төхөөрөмж / OS</th>
+                              <th className="px-4 py-2">IP / Байршил</th>
+                              <th className="px-4 py-2">Төхөөрөмж / OS / Browser</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100">
@@ -421,14 +421,16 @@ export const QRDetailsModal: React.FC<QRDetailsModalProps> = ({ qr, onClose }) =
                                 </td>
                                 <td className="px-4 py-3 text-slate-500">
                                   <div className="flex flex-col">
+                                    <span className="font-mono text-[10px]">{log.ip_address || '0.0.0.0'}</span>
                                     <span className="font-bold">{log.country || 'Unknown'}</span>
                                     <span className="text-[10px] opacity-70">{log.city || 'Unknown'}</span>
                                   </div>
                                 </td>
                                 <td className="px-4 py-3 text-slate-400">
                                   <div className="flex flex-col">
-                                    <span className="capitalize">{log.device_type || 'desktop'}</span>
+                                    <span className="capitalize font-bold text-slate-600">{log.device_type || 'desktop'}</span>
                                     <span className="text-[10px] opacity-70">{log.os_name || 'Unknown'}</span>
+                                    <span className="text-[10px] opacity-70 italic">{log.browser_name || 'Unknown'}</span>
                                   </div>
                                 </td>
                               </tr>

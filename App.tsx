@@ -48,9 +48,17 @@ const App: React.FC = () => {
       try {
         const sessionPromise = supabase.auth.getSession();
         const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Session timeout')), 10000));
-        const { data: { session } } = await Promise.race([sessionPromise, timeoutPromise]) as any;
+        const result = await Promise.race([sessionPromise, timeoutPromise]) as any;
         if (!mounted) return;
         
+        if (result.error) {
+          console.error('[Auth] Session error:', result.error.message);
+          if (result.error.message?.includes('Refresh Token')) {
+            await supabase.auth.signOut();
+          }
+        }
+        
+        const session = result.data?.session;
         setSession(session);
         if (session) {
           await fetchProfile(session.user.id, session.access_token);
@@ -59,7 +67,10 @@ const App: React.FC = () => {
         }
       } catch (err: any) {
         if (mounted) {
-          if (err.message.includes('Settings')) setConfigError(err.message);
+          if (err.message?.includes('Settings')) setConfigError(err.message);
+          if (err.message?.includes('Refresh Token')) {
+            await supabase.auth.signOut();
+          }
           setLoading(false);
         }
       }

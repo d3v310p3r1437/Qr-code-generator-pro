@@ -1,5 +1,30 @@
 
-export type QRDataType = 'url' | 'text' | 'wifi' | 'file' | 'bio';
+export type QRDataType = 'url' | 'text' | 'wifi' | 'file' | 'bio' | 'vcard' | 'app' | 'event';
+
+export interface VCardData {
+  firstName: string;
+  lastName: string;
+  organization?: string;
+  title?: string;
+  phone?: string;
+  email?: string;
+  website?: string;
+  address?: string;
+}
+
+export interface AppData {
+  iosUrl: string;
+  androidUrl: string;
+  fallbackUrl?: string;
+}
+
+export interface EventData {
+  title: string;
+  description?: string;
+  location?: string;
+  startDate: string;
+  endDate: string;
+}
 
 export interface BioLink {
   id: string;
@@ -45,6 +70,8 @@ export interface UserProfile {
   role: 'admin' | 'user';
   qr_limit: number;
   qr_count?: number;
+  allowed_qr_types?: QRDataType[];
+  expires_at?: string | null;
 }
 
 export interface QRCodeData {
@@ -61,7 +88,7 @@ export interface QRCodeData {
   qr_image_url?: string;
   file_url?: string;
   file_type?: string;
-  bio_data?: BioData;
+  bio_data?: any;
 }
 
 export interface GeneratedHistory {
