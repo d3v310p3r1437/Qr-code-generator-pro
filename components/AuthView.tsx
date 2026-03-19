@@ -16,7 +16,7 @@ export const AuthView: React.FC = () => {
 
     try {
       const loginPromise = supabase.auth.signInWithPassword({ email, password });
-      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Холболт салсан байна (Timeout)')), 15000));
+      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Холболт салсан байна (Timeout)')), 30000));
       const { error } = await Promise.race([loginPromise, timeoutPromise]) as any;
       if (error) setError(error.message);
     } catch (err: any) {

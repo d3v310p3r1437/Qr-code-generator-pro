@@ -24,6 +24,7 @@ import {
 
 import { FileViewer } from './components/FileViewer';
 import { BioPage } from './components/BioPage';
+import { SecureQR } from './components/SecureQR';
 
 const App: React.FC = () => {
   const [session, setSession] = useState<any>(null);
@@ -47,7 +48,7 @@ const App: React.FC = () => {
     const initAuth = async () => {
       try {
         const sessionPromise = supabase.auth.getSession();
-        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Session timeout')), 10000));
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Session timeout')), 30000));
         const result = await Promise.race([sessionPromise, timeoutPromise]) as any;
         if (!mounted) return;
         
@@ -108,11 +109,10 @@ const App: React.FC = () => {
     if (fetchingRef.current) return;
     fetchingRef.current = true;
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
     try {
       setProfileError(null);
-      // Use absolute URL to be safe in iframe context
-      const url = `${window.location.origin}/api/profile/${userId}`;
+      const url = `/api/profile/${userId}`;
       console.log(`[App] Fetching profile from: ${url}`);
 
       const response = await fetch(url, {
@@ -139,10 +139,13 @@ const App: React.FC = () => {
       setProfile(data);
     } catch (error: any) {
       clearTimeout(timeoutId);
-      console.error('[App] Error fetching profile:', error);
-      console.error('[App] Error name:', error.name);
-      console.error('[App] Error message:', error.message);
-      setProfileError(error.name === 'AbortError' ? 'Холболт салсан байна (Timeout)' : `Fetch error: ${error.message}`);
+      if (error.name === 'AbortError') {
+        console.warn('[App] Profile fetch timed out after 30s');
+        setProfileError('Холболт салсан байна (Timeout)');
+      } else {
+        console.error('[App] Error fetching profile:', error);
+        setProfileError(`Fetch error: ${error.message}`);
+      }
       setProfile(null);
     } finally {
       fetchingRef.current = false;
@@ -239,6 +242,14 @@ const App: React.FC = () => {
     return (
       <Routes>
         <Route path="/p/:id" element={<BioPage />} />
+      </Routes>
+    );
+  }
+
+  if (location.pathname.startsWith('/secure/')) {
+    return (
+      <Routes>
+        <Route path="/secure/:id" element={<SecureQR />} />
       </Routes>
     );
   }

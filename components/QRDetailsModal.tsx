@@ -10,7 +10,8 @@ import {
   CheckCircle2,
   Copy,
   Download,
-  Loader2
+  Loader2,
+  Lock
 } from 'lucide-react';
 import { QRCodeData } from '../types';
 import { supabase } from '../services/supabaseClient';
@@ -46,7 +47,7 @@ export const QRDetailsModal: React.FC<QRDetailsModalProps> = ({ qr, onClose }) =
     const fetchAnalytics = async () => {
       setLoading(true);
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000);
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
       try {
         const { data: { session } } = await supabase.auth.getSession();
         const token = session?.access_token;
@@ -225,6 +226,20 @@ export const QRDetailsModal: React.FC<QRDetailsModalProps> = ({ qr, onClose }) =
                     {isExpired ? 'Дууссан' : 'Идэвхтэй'}
                   </span>
                 </div>
+
+                {qr.has_password && (
+                  <div className="flex items-center justify-between p-4 bg-white border border-slate-100 rounded-2xl shadow-sm">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
+                        <Lock size={16} />
+                      </div>
+                      <span className="text-sm font-bold text-slate-600">Хамгаалалт</span>
+                    </div>
+                    <span className="text-xs font-black uppercase text-blue-600">
+                      Нууц үгтэй
+                    </span>
+                  </div>
+                )}
 
                 <div className="flex items-center justify-between p-4 bg-white border border-slate-100 rounded-2xl shadow-sm">
                   <div className="flex items-center gap-3">

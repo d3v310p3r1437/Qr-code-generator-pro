@@ -6,6 +6,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { UAParser } from 'ua-parser-js';
 import rateLimit from 'express-rate-limit';
+import QRCode from 'qrcode';
+import cookieParser from 'cookie-parser';
 
 dotenv.config();
 
@@ -14,6 +16,8 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '3000', 10);
+
+app.use(cookieParser());
 
 // Trust proxy to get real client IP behind Nginx/Cloud Run
 // Setting to 1 instead of true to avoid express-rate-limit ValidationError
@@ -297,7 +301,17 @@ apiRouter.get('/admin/qr-codes', requireAuth, requireAdmin, async (req, res) => 
   try {
     const { data, error } = await admin.from('qr_codes').select('*, profiles(email)').order('created_at', { ascending: false });
     if (error) throw error;
-    res.json(data);
+
+    // Strip password hash
+    const safeData = data.map((qr: any) => {
+      if (qr.config && qr.config.password) {
+        const { password, ...safeConfig } = qr.config;
+        return { ...qr, config: safeConfig, has_password: true };
+      }
+      return { ...qr, has_password: false };
+    });
+
+    res.json(safeData);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -309,7 +323,7 @@ apiRouter.post('/qr-codes', requireAuth, async (req, res) => {
   if (!admin) return res.status(500).json({ error: 'Supabase Admin client not configured' });
   try {
     const user = (req as any).user;
-    const { data: profile } = await admin.from('profiles').select('role, allowed_qr_types, expires_at').eq('id', user.id).single();
+    const { data: profile } = await admin.from('profiles').select('role, allowed_qr_types, expires_at, qr_limit').eq('id', user.id).single();
     
     if (profile && profile.role !== 'admin') {
       if (profile.expires_at && new Date(profile.expires_at) < new Date()) {
@@ -320,12 +334,142 @@ apiRouter.post('/qr-codes', requireAuth, async (req, res) => {
           return res.status(403).json({ error: 'You are not allowed to create this type of QR code.' });
         }
       }
+      const { count } = await admin.from('qr_codes').select('*', { count: 'exact', head: true }).eq('user_id', user.id);
+      if ((count || 0) >= profile.qr_limit) {
+        return res.status(403).json({ error: 'QR кодын лимит хэтэрсэн байна.' });
+      }
     }
 
-    const { data, error } = await admin.from('qr_codes').insert(req.body).select().single();
+    const qrData = { ...req.body };
+    if (qrData.config && qrData.config.password) {
+      const bcrypt = await import('bcrypt');
+      const salt = await bcrypt.genSalt(10);
+      qrData.config.password = await bcrypt.hash(qrData.config.password, salt);
+    }
+
+    const { data, error } = await admin.from('qr_codes').insert(qrData).select().single();
     if (error) throw error;
+    
+    // Strip password hash from response
+    if (data.config && data.config.password) {
+      const { password, ...safeConfig } = data.config;
+      data.config = safeConfig;
+      data.has_password = true;
+    }
+    
     res.json(data);
   } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Bulk Save vCard QR Codes
+apiRouter.post('/qr-codes/bulk', requireAuth, async (req, res) => {
+  const admin = getSupabaseAdmin();
+  if (!admin) return res.status(500).json({ error: 'Supabase Admin client not configured' });
+  
+  try {
+    const user = (req as any).user;
+    const { data: profile } = await admin.from('profiles').select('role, allowed_qr_types, expires_at, qr_limit').eq('id', user.id).single();
+    
+    if (profile && profile.role !== 'admin') {
+      if (profile.expires_at && new Date(profile.expires_at) < new Date()) {
+        return res.status(403).json({ error: 'Your account has expired. Please contact the administrator.' });
+      }
+      if (profile.allowed_qr_types && profile.allowed_qr_types.length > 0) {
+        if (!profile.allowed_qr_types.includes('vcard')) {
+          return res.status(403).json({ error: 'You are not allowed to create this type of QR code.' });
+        }
+      }
+    }
+
+    const { items, config } = req.body;
+    if (!items || !Array.isArray(items)) {
+      return res.status(400).json({ error: 'Invalid items array' });
+    }
+
+    let processedConfig = { ...config };
+    if (processedConfig.password) {
+      const bcrypt = await import('bcrypt');
+      const salt = await bcrypt.genSalt(10);
+      processedConfig.password = await bcrypt.hash(processedConfig.password, salt);
+    }
+
+    if (profile && profile.role !== 'admin') {
+      const { count } = await admin.from('qr_codes').select('*', { count: 'exact', head: true }).eq('user_id', user.id);
+      const currentCount = count || 0;
+      if (currentCount + items.length > profile.qr_limit) {
+        return res.status(403).json({ error: `QR кодын лимит хэтэрлээ. Таны үлдэгдэл: ${profile.qr_limit - currentCount}` });
+      }
+    }
+
+    const results = [];
+    
+    for (const item of items) {
+      const vcardString = `BEGIN:VCARD\nVERSION:3.0\nN:${item.lastName || ''};${item.firstName || ''};;;\nFN:${item.firstName || ''} ${item.lastName || ''}\nORG:${item.organization || ''}${item.department ? ';' + item.department : ''}\nTITLE:${item.title || ''}\nTEL;TYPE=WORK,VOICE:${item.phone || ''}\nTEL;TYPE=CELL,VOICE:${item.personalPhone || ''}\nEMAIL;TYPE=PREF,INTERNET:${item.email || ''}\nURL:${item.website || ''}\nADR;TYPE=WORK:;;${item.address || ''};;;;\nEND:VCARD`;
+      
+      // Insert DB record first to get ID
+      const qrRecord = {
+        user_id: user.id,
+        title: `${item.firstName || ''} ${item.lastName || ''}`.trim() || 'vCard',
+        type: 'vcard',
+        value: vcardString,
+        bio_data: item,
+        config: processedConfig
+      };
+      
+      const { data: insertedQr, error: insertError } = await admin.from('qr_codes').insert(qrRecord).select().single();
+      if (insertError) throw insertError;
+      
+      // Generate QR Image
+      const targetUrl = `${req.protocol}://${req.get('host')}/r/${insertedQr.id}`;
+      const qrBuffer = await QRCode.toBuffer(targetUrl, {
+        errorCorrectionLevel: config?.level || 'M',
+        margin: 2,
+        width: 1024,
+        color: {
+          dark: config?.fgColor || '#000000',
+          light: config?.bgColor || '#ffffff'
+        }
+      });
+      
+      // Upload to Supabase Storage
+      const fileName = `${user.id}/${insertedQr.id}.png`;
+      const { error: uploadError } = await admin.storage
+        .from('qrcodes')
+        .upload(fileName, qrBuffer, {
+          contentType: 'image/png',
+          upsert: true
+        });
+        
+      if (uploadError) throw uploadError;
+      
+      // Get public URL
+      const { data: { publicUrl } } = admin.storage
+        .from('qrcodes')
+        .getPublicUrl(fileName);
+        
+      // Update record with image URL and target URL
+      const { data: updatedQr, error: updateError } = await admin.from('qr_codes')
+        .update({ qr_image_url: publicUrl, target_url: targetUrl })
+        .eq('id', insertedQr.id)
+        .select()
+        .single();
+        
+      if (updateError) throw updateError;
+      
+      if (updatedQr.config && updatedQr.config.password) {
+        const { password, ...safeConfig } = updatedQr.config;
+        updatedQr.config = safeConfig;
+        updatedQr.has_password = true;
+      }
+      
+      results.push(updatedQr);
+    }
+    
+    res.json({ success: true, count: results.length, data: results });
+  } catch (error: any) {
+    console.error('Bulk generation error:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -348,8 +492,23 @@ apiRouter.patch('/qr-codes/:id', requireAuth, async (req, res) => {
       }
     }
 
-    const { data, error } = await admin.from('qr_codes').update(req.body).eq('id', id).select().single();
+    const updateData = { ...req.body };
+    if (updateData.config && updateData.config.password) {
+      const bcrypt = await import('bcrypt');
+      const salt = await bcrypt.genSalt(10);
+      updateData.config.password = await bcrypt.hash(updateData.config.password, salt);
+    }
+
+    const { data, error } = await admin.from('qr_codes').update(updateData).eq('id', id).select().single();
     if (error) throw error;
+    
+    // Strip password hash from response
+    if (data.config && data.config.password) {
+      const { password, ...safeConfig } = data.config;
+      data.config = safeConfig;
+      data.has_password = true;
+    }
+    
     res.json(data);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -439,7 +598,17 @@ apiRouter.get('/user/qr-codes/:userId', requireAuth, async (req, res) => {
   try {
     const { data, error } = await admin.from('qr_codes').select('*').eq('user_id', userId).order('created_at', { ascending: false });
     if (error) throw error;
-    res.json(data);
+    
+    // Strip password hash
+    const safeData = data.map((qr: any) => {
+      if (qr.config && qr.config.password) {
+        const { password, ...safeConfig } = qr.config;
+        return { ...qr, config: safeConfig, has_password: true };
+      }
+      return { ...qr, has_password: false };
+    });
+    
+    res.json(safeData);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -518,11 +687,21 @@ apiRouter.get('/public/qr-codes/:id', async (req, res) => {
   try {
     const { data, error } = await admin
       .from('qr_codes')
-      .select('id, title, description, type, file_url, file_type, target_url, bio_data')
+      .select('id, title, description, type, file_url, file_type, target_url, bio_data, config')
       .eq('id', id)
       .single();
     if (error) throw error;
-    res.json(data);
+
+    if (data.config && data.config.password) {
+      const cookieName = `qr_unlocked_${id}`;
+      if (!req.cookies || req.cookies[cookieName] !== 'true') {
+        return res.status(401).json({ error: 'Password required', require_password: true });
+      }
+    }
+
+    // Strip config before sending
+    const { config, ...safeData } = data;
+    res.json(safeData);
   } catch (error: any) {
     res.status(404).json({ error: 'QR code not found' });
   }
@@ -644,6 +823,42 @@ apiRouter.post('/scan/:id', scanLimiter, async (req, res) => {
   }
 });
 
+// Verify QR Password
+apiRouter.post('/verify-qr', async (req, res) => {
+  const { id, password } = req.body;
+  if (!id || !password) return res.status(400).json({ error: 'ID and password are required' });
+
+  const admin = getSupabaseAdmin();
+  if (!admin) return res.status(500).json({ error: 'Supabase Admin client not configured' });
+
+  try {
+    const { data: qr, error } = await admin.from('qr_codes').select('config').eq('id', id).single();
+    if (error || !qr) return res.status(404).json({ error: 'QR code not found' });
+
+    if (!qr.config || !qr.config.password) {
+      return res.json({ success: true }); // No password required
+    }
+
+    const bcrypt = await import('bcrypt');
+    const isValid = await bcrypt.compare(password, qr.config.password);
+
+    if (isValid) {
+      // Set a cookie to remember the unlock for 1 hour
+      res.cookie(`qr_unlocked_${id}`, 'true', { 
+        maxAge: 60 * 60 * 1000, // 1 hour
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax'
+      });
+      res.json({ success: true });
+    } else {
+      res.status(401).json({ error: 'Нууц үг буруу байна' });
+    }
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Mount API Router
 app.use('/api', apiRouter);
 
@@ -662,6 +877,17 @@ app.get('/r/:id', scanLimiter, async (req, res, next) => {
     
     if (qr.expires_at && new Date(qr.expires_at) < new Date()) {
       return res.redirect('/qr-error?type=expired');
+    }
+
+    // Check for password protection
+    if (qr.config && qr.config.password) {
+      const cookieName = `qr_unlocked_${id}`;
+      if (req.cookies && req.cookies[cookieName] === 'true') {
+        // Already unlocked, proceed
+      } else {
+        // Redirect to secure page
+        return res.redirect(`/secure/${id}`);
+      }
     }
 
     // Increment scan count and log scan asynchronously
@@ -850,7 +1076,7 @@ app.get('/r/:id', scanLimiter, async (req, res, next) => {
     if (qr.type === 'vcard') {
       if (qr.bio_data) {
         const vcardData = qr.bio_data as any;
-        const vcardString = `BEGIN:VCARD\nVERSION:3.0\nN:${vcardData.lastName || ''};${vcardData.firstName || ''};;;\nFN:${vcardData.firstName || ''} ${vcardData.lastName || ''}\nORG:${vcardData.organization || ''}\nTITLE:${vcardData.title || ''}\nTEL;TYPE=WORK,VOICE:${vcardData.phone || ''}\nEMAIL;TYPE=PREF,INTERNET:${vcardData.email || ''}\nURL:${vcardData.website || ''}\nADR;TYPE=WORK:;;${vcardData.address || ''};;;;\nEND:VCARD`;
+        const vcardString = `BEGIN:VCARD\nVERSION:3.0\nN:${vcardData.lastName || ''};${vcardData.firstName || ''};;;\nFN:${vcardData.firstName || ''} ${vcardData.lastName || ''}\nORG:${vcardData.organization || ''}${vcardData.department ? ';' + vcardData.department : ''}\nTITLE:${vcardData.title || ''}\nTEL;TYPE=WORK,VOICE:${vcardData.phone || ''}\nTEL;TYPE=CELL,VOICE:${vcardData.personalPhone || ''}\nEMAIL;TYPE=PREF,INTERNET:${vcardData.email || ''}\nURL:${vcardData.website || ''}\nADR;TYPE=WORK:;;${vcardData.address || ''};;;;\nEND:VCARD`;
         res.setHeader('Content-Type', 'text/vcard');
         res.setHeader('Content-Disposition', `attachment; filename="contact.vcf"`);
         return res.send(vcardString);

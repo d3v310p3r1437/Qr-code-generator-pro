@@ -48,7 +48,7 @@ export const AdminDashboard: React.FC<{ profile: UserProfile }> = ({ profile }) 
   const fetchData = async () => {
     setLoading(true);
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000);
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
@@ -534,11 +534,25 @@ export const AdminDashboard: React.FC<{ profile: UserProfile }> = ({ profile }) 
                       className="hover:bg-slate-50/50 transition-colors cursor-pointer"
                       onClick={() => setSelectedQR(qr)}
                     >
-                      <td className="px-6 py-4">
+                      <td className="px-6 py-4 relative">
                         {qr.qr_image_url ? (
-                          <img src={qr.qr_image_url} alt="" className="w-10 h-10 rounded-lg border border-slate-100 object-contain" referrerPolicy="no-referrer" />
+                          <div className="relative w-10 h-10">
+                            <img src={qr.qr_image_url} alt="" className="w-10 h-10 rounded-lg border border-slate-100 object-contain" referrerPolicy="no-referrer" />
+                            {qr.has_password && (
+                              <div className="absolute -top-1 -right-1 bg-blue-600 text-white p-0.5 rounded-full shadow-sm" title="Нууц үгээр хамгаалагдсан">
+                                <Lock size={10} />
+                              </div>
+                            )}
+                          </div>
                         ) : (
-                          <div className="w-10 h-10 rounded-lg bg-slate-50 flex items-center justify-center text-slate-300"><QrCode size={16} /></div>
+                          <div className="w-10 h-10 rounded-lg bg-slate-50 flex items-center justify-center text-slate-300 relative">
+                            <QrCode size={16} />
+                            {qr.has_password && (
+                              <div className="absolute -top-1 -right-1 bg-blue-600 text-white p-0.5 rounded-full shadow-sm" title="Нууц үгээр хамгаалагдсан">
+                                <Lock size={10} />
+                              </div>
+                            )}
+                          </div>
                         )}
                       </td>
                       <td className="px-6 py-4">

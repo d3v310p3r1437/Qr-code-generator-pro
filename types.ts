@@ -1,12 +1,14 @@
 
-export type QRDataType = 'url' | 'text' | 'wifi' | 'file' | 'bio' | 'vcard' | 'app' | 'event';
+export type QRDataType = 'url' | 'text' | 'wifi' | 'file' | 'bio' | 'vcard' | 'app' | 'event' | 'vcard_bulk';
 
 export interface VCardData {
   firstName: string;
   lastName: string;
   organization?: string;
+  department?: string;
   title?: string;
-  phone?: string;
+  phone?: string; // Work phone
+  personalPhone?: string;
   email?: string;
   website?: string;
   address?: string;
@@ -62,6 +64,7 @@ export interface QRConfig {
   excavate?: boolean;
   dotsStyle: DotsStyle;
   cornersStyle: CornerStyle;
+  password?: string | null;
 }
 
 export interface UserProfile {
@@ -89,6 +92,7 @@ export interface QRCodeData {
   file_url?: string;
   file_type?: string;
   bio_data?: any;
+  has_password?: boolean;
 }
 
 export interface GeneratedHistory {

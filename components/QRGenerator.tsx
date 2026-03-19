@@ -42,11 +42,13 @@ import {
   Briefcase,
   Building2,
   X,
-  QrCode
+  QrCode,
+  Users
 } from 'lucide-react';
 import { generateSlogan } from '../services/geminiService';
 import { QRConfig, QRDataType, DotsStyle, CornerStyle, UserProfile, BioData, BioLink } from '../types';
 import { supabase } from '../services/supabaseClient';
+import * as XLSX from 'xlsx';
 
 const THEMES = [
   { name: 'Classic', fg: '#000000', bg: '#ffffff' },
@@ -114,12 +116,19 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
   const [bioImage, setBioImage] = useState<File | null>(null);
   const [bioImagePreview, setBioImagePreview] = useState<string>('');
   
+  const [bulkData, setBulkData] = useState<any[]>([]);
+  const [bulkGenerating, setBulkGenerating] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState(0);
+  const [error, setError] = useState<string>('');
+
   const [vcardData, setVcardData] = useState({
     firstName: '',
     lastName: '',
     organization: '',
+    department: '',
     title: '',
     phone: '',
+    personalPhone: '',
     email: '',
     website: '',
     address: ''
@@ -142,6 +151,8 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [expiresAt, setExpiresAt] = useState('');
+  const [usePassword, setUsePassword] = useState(false);
+  const [qrPassword, setQrPassword] = useState('');
   
   const [slogan, setSlogan] = useState<string>('');
   const [loadingAI, setLoadingAI] = useState<boolean>(false);
@@ -245,6 +256,44 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
     return '';
   };
 
+  const handleDownloadTemplate = () => {
+    const ws = XLSX.utils.json_to_sheet([{
+      'Овог': 'Бат',
+      'Нэр': 'Болд',
+      'Байгууллага': 'Компани ХХК',
+      'Хэлтэс': 'Мэдээллийн технологи',
+      'Албан тушаал': 'Ахлах хөгжүүлэгч',
+      'Ажлын утас': '99112233',
+      'Хувийн утас': '88112233',
+      'Цахим шуудан': 'bold@example.com',
+      'Вэб хаяг': 'https://example.com',
+      'Хаяг': 'Улаанбаатар, Сүхбаатар дүүрэг'
+    }]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'vCard_Template');
+    XLSX.writeFile(wb, 'vcard_bulk_template.xlsx');
+  };
+
+  const handleBulkFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const data = new Uint8Array(evt.target?.result as ArrayBuffer);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        const json = XLSX.utils.sheet_to_json(worksheet);
+        setBulkData(json);
+      } catch (err) {
+        alert('Excel файл уншихад алдаа гарлаа.');
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
   const handleUpdatePreview = () => {
     const value = getQRValue();
     if (!value) return;
@@ -253,6 +302,57 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
     
     if (activeTab === 'bio') {
       setShowBioPreview(true);
+    }
+  };
+
+  const handleBulkSave = async () => {
+    if (bulkData.length === 0) return;
+    setBulkGenerating(true);
+    setBulkProgress(0);
+    setError('');
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+
+      const items = bulkData.map(row => ({
+        lastName: row['Овог'] || '',
+        firstName: row['Нэр'] || '',
+        organization: row['Байгууллага'] || '',
+        department: row['Хэлтэс'] || '',
+        title: row['Албан тушаал'] || '',
+        phone: row['Ажлын утас'] || '',
+        personalPhone: row['Хувийн утас'] || '',
+        email: row['Цахим шуудан'] || '',
+        website: row['Вэб хаяг'] || '',
+        address: row['Хаяг'] || ''
+      }));
+
+      // We can send all items to the backend and let it handle the generation
+      const response = await fetch('/api/qr-codes/bulk', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          items,
+          config
+        })
+      });
+
+      if (!response.ok) {
+        const result = await response.json();
+        throw new Error(result.error || 'Бөөнөөр үүсгэхэд алдаа гарлаа');
+      }
+
+      setBulkProgress(100);
+      alert(`${items.length} ширхэг QR код амжилттай үүслээ!`);
+      onSaved();
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setBulkGenerating(false);
     }
   };
 
@@ -345,7 +445,7 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
           title,
           description,
           target_url: targetUrl,
-          config: config,
+          config: usePassword && qrPassword ? { ...config, password: qrPassword } : config,
           expires_at: expiresAt || null,
           type: activeTab,
           file_url: uploadedFileUrl || null,
@@ -535,6 +635,32 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
                 className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none text-sm resize-none"
               />
             </div>
+            
+            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+              <label className="flex items-center gap-2 cursor-pointer mb-3">
+                <input 
+                  type="checkbox" 
+                  checked={usePassword}
+                  onChange={(e) => setUsePassword(e.target.checked)}
+                  className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500"
+                />
+                <span className="text-sm font-bold text-slate-700">Нууц үгээр хамгаалах</span>
+              </label>
+              
+              {usePassword && (
+                <div className="mt-3">
+                  <label className="block text-xs font-bold text-slate-500 mb-1 uppercase ml-1">Нууц үг</label>
+                  <input
+                    type="text"
+                    placeholder="Нууц үгээ оруулна уу"
+                    value={qrPassword}
+                    onChange={(e) => setQrPassword(e.target.value)}
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                  />
+                  <p className="text-xs text-slate-500 mt-1 ml-1">Энэхүү QR кодыг уншуулахад нууц үг шаардах болно.</p>
+                </div>
+              )}
+            </div>
           </section>
 
           {/* Tabs */}
@@ -548,7 +674,8 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
               { id: 'vcard', icon: User, label: 'Нэрийн хуудас' },
               { id: 'app', icon: Monitor, label: 'App Store' },
               { id: 'event', icon: Calendar, label: 'Арга хэмжээ' },
-            ].filter(tab => user.role === 'admin' || !user.allowed_qr_types || user.allowed_qr_types.includes(tab.id as QRDataType)).map(tab => (
+              { id: 'vcard_bulk', icon: Users, label: 'Бөөнөөр (Excel)' },
+            ].filter(tab => user.role === 'admin' || !user.allowed_qr_types || user.allowed_qr_types.includes(tab.id as QRDataType) || (tab.id === 'vcard_bulk' && user.allowed_qr_types.includes('vcard'))).map(tab => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id as QRDataType)}
@@ -840,19 +967,27 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
                     <input type="text" value={vcardData.organization} onChange={(e) => setVcardData({...vcardData, organization: e.target.value})} className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none" />
                   </div>
                   <div>
-                    <label className="block text-xs font-bold text-slate-500 mb-1 uppercase ml-1">Албан тушаал</label>
-                    <input type="text" value={vcardData.title} onChange={(e) => setVcardData({...vcardData, title: e.target.value})} className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none" />
+                    <label className="block text-xs font-bold text-slate-500 mb-1 uppercase ml-1">Хэлтэс</label>
+                    <input type="text" value={vcardData.department || ''} onChange={(e) => setVcardData({...vcardData, department: e.target.value})} className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none" />
                   </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1 uppercase ml-1">Албан тушаал</label>
+                  <input type="text" value={vcardData.title} onChange={(e) => setVcardData({...vcardData, title: e.target.value})} className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none" />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs font-bold text-slate-500 mb-1 uppercase ml-1">Утас</label>
+                    <label className="block text-xs font-bold text-slate-500 mb-1 uppercase ml-1">Ажлын утас</label>
                     <input type="tel" value={vcardData.phone} onChange={(e) => setVcardData({...vcardData, phone: e.target.value})} className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none" />
                   </div>
                   <div>
-                    <label className="block text-xs font-bold text-slate-500 mb-1 uppercase ml-1">Имэйл</label>
-                    <input type="email" value={vcardData.email} onChange={(e) => setVcardData({...vcardData, email: e.target.value})} className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none" />
+                    <label className="block text-xs font-bold text-slate-500 mb-1 uppercase ml-1">Хувийн утас</label>
+                    <input type="tel" value={vcardData.personalPhone || ''} onChange={(e) => setVcardData({...vcardData, personalPhone: e.target.value})} className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none" />
                   </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1 uppercase ml-1">Имэйл</label>
+                  <input type="email" value={vcardData.email} onChange={(e) => setVcardData({...vcardData, email: e.target.value})} className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none" />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-1 uppercase ml-1">Вэб сайт</label>
@@ -908,23 +1043,92 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
                 </div>
               </div>
             )}
+
+            {activeTab === 'vcard_bulk' && (
+              <div className="space-y-4">
+                <div className="bg-blue-50 text-blue-800 p-4 rounded-xl text-sm">
+                  <p className="font-bold mb-2">Excel файлаас бөөнөөр үүсгэх</p>
+                  <p className="mb-3">Та доорх загвар файлыг татаж аваад мэдээллээ бөглөөд буцааж оруулна уу.</p>
+                  <button 
+                    onClick={handleDownloadTemplate}
+                    className="bg-white text-blue-600 px-4 py-2 rounded-lg font-bold shadow-sm hover:shadow transition-all text-xs flex items-center gap-2"
+                  >
+                    <Download size={14} /> Загвар файл татах
+                  </button>
+                </div>
+                
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1 uppercase ml-1">Excel файл оруулах (.xlsx)</label>
+                  <div className="relative border-2 border-dashed border-slate-300 rounded-xl p-8 text-center hover:bg-slate-50 transition-colors">
+                    <input 
+                      type="file" 
+                      accept=".xlsx, .xls" 
+                      onChange={handleBulkFileUpload}
+                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                    />
+                    <Upload className="mx-auto text-slate-400 mb-2" size={32} />
+                    <p className="text-sm font-medium text-slate-600">Файлаа энд чирж оруулах эсвэл дарж сонгоно уу</p>
+                  </div>
+                </div>
+
+                {bulkData.length > 0 && (
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="font-bold text-sm text-slate-700">Оруулсан өгөгдөл</p>
+                      <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full text-xs font-bold">
+                        Нийт: {bulkData.length}
+                      </span>
+                    </div>
+                    <div className="max-h-40 overflow-y-auto text-xs text-slate-600 bg-white rounded-lg border border-slate-100">
+                      <table className="w-full text-left border-collapse">
+                        <thead className="bg-slate-50 sticky top-0">
+                          <tr>
+                            <th className="px-3 py-2 border-b">Овог</th>
+                            <th className="px-3 py-2 border-b">Нэр</th>
+                            <th className="px-3 py-2 border-b">Байгууллага</th>
+                            <th className="px-3 py-2 border-b">Утас</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-50">
+                          {bulkData.slice(0, 5).map((row, i) => (
+                            <tr key={i}>
+                              <td className="px-3 py-2">{row['Овог'] || ''}</td>
+                              <td className="px-3 py-2">{row['Нэр'] || ''}</td>
+                              <td className="px-3 py-2">{row['Байгууллага'] || ''}</td>
+                              <td className="px-3 py-2">{row['Ажлын утас'] || row['Хувийн утас'] || ''}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      {bulkData.length > 5 && (
+                        <div className="text-center py-2 text-slate-400 bg-slate-50 border-t border-slate-100">
+                          ... болон бусад {bulkData.length - 5} мөр
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
             
-            <div className="mt-4 flex flex-col md:flex-row gap-3">
-              <button
-                onClick={handleUpdatePreview}
-                className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3 rounded-xl transition-all flex items-center justify-center gap-2"
-              >
-                Урьдчилан харах <ChevronRight size={18} />
-              </button>
-              <button
-                onClick={handleAISlogan}
-                disabled={loadingAI}
-                className="px-6 py-3 bg-purple-50 text-purple-600 hover:bg-purple-100 rounded-xl font-bold flex items-center justify-center gap-2 transition-all disabled:opacity-50"
-              >
-                <Sparkles size={18} />
-                {loadingAI ? 'AI...' : 'AI Уриа'}
-              </button>
-            </div>
+            {activeTab !== 'vcard_bulk' && (
+              <div className="mt-4 flex flex-col md:flex-row gap-3">
+                <button
+                  onClick={handleUpdatePreview}
+                  className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3 rounded-xl transition-all flex items-center justify-center gap-2"
+                >
+                  Урьдчилан харах <ChevronRight size={18} />
+                </button>
+                <button
+                  onClick={handleAISlogan}
+                  disabled={loadingAI}
+                  className="px-6 py-3 bg-purple-50 text-purple-600 hover:bg-purple-100 rounded-xl font-bold flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+                >
+                  <Sparkles size={18} />
+                  {loadingAI ? 'AI...' : 'AI Уриа'}
+                </button>
+              </div>
+            )}
           </section>
 
           {/* Design Stylings */}
@@ -1044,56 +1248,97 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
         <div className="lg:col-span-5">
           <div className="sticky top-8 space-y-6">
             <div className="bg-white p-8 rounded-[40px] shadow-2xl shadow-slate-200/60 border border-slate-50 flex flex-col items-center">
-              <div className="relative group w-full mb-6">
-                <div className="absolute -top-3 left-1/2 -translate-x-1/2 z-10 bg-blue-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest shadow-lg">
-                  Preview
-                </div>
-                <div 
-                  className="qr-preview-box w-full aspect-square bg-white rounded-3xl shadow-inner border border-slate-100 flex justify-center items-center overflow-hidden p-6"
-                  style={{ maxWidth: '400px', margin: '0 auto' }}
-                >
-                  <div ref={qrRef} className="w-full h-full flex items-center justify-center" />
-                </div>
-              </div>
-
-              <div className="w-full bg-slate-50 p-4 rounded-2xl mb-6 border border-slate-100 overflow-hidden">
-                <div className="flex items-center justify-between mb-1.5">
-                  <div className="flex items-center gap-2 text-xs font-bold text-slate-400 uppercase tracking-tighter">
-                    <Globe size={12} /> QR доторх өгөгдөл
+              {activeTab === 'vcard_bulk' ? (
+                <div className="w-full text-center py-12">
+                  <div className="w-24 h-24 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-6">
+                    <Users size={48} className="text-blue-500" />
                   </div>
-                  <div className="flex items-center gap-1 text-[10px] font-bold text-blue-500 bg-blue-50 px-1.5 py-0.5 rounded">
-                    <Monitor size={10} /> {config.size}px
-                  </div>
-                </div>
-                <p className="text-[11px] font-mono text-slate-600 break-all leading-relaxed bg-white p-2 rounded-lg border border-slate-50">
-                  {config.value}
-                </p>
-              </div>
+                  <h3 className="text-xl font-bold text-slate-800 mb-2">Бөөнөөр үүсгэх</h3>
+                  <p className="text-sm text-slate-500 mb-8">
+                    {bulkData.length > 0 
+                      ? `Та ${bulkData.length} хүний мэдээлэл оруулсан байна. Доорх товчийг дарж QR кодуудыг үүсгэнэ үү.`
+                      : 'Excel файлаа оруулж QR кодуудыг бөөнөөр үүсгэнэ үү.'}
+                  </p>
+                  
+                  {bulkGenerating && (
+                    <div className="w-full max-w-xs mx-auto mb-6">
+                      <div className="flex justify-between text-xs font-bold text-slate-500 mb-2">
+                        <span>Үүсгэж байна...</span>
+                        <span>{bulkProgress}%</span>
+                      </div>
+                      <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                        <div 
+                          className="h-full bg-blue-500 transition-all duration-300"
+                          style={{ width: `${bulkProgress}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
 
-              {slogan && (
-                <div className="mb-6 px-4 py-3 bg-blue-50/50 rounded-2xl border border-blue-100/50 text-center w-full">
-                  <p className="text-slate-700 italic font-medium leading-relaxed">"{slogan}"</p>
+                  <button
+                    onClick={handleBulkSave}
+                    disabled={bulkData.length === 0 || bulkGenerating}
+                    className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-2xl flex items-center justify-center gap-3 transition-all shadow-lg active:scale-[0.98] disabled:opacity-50"
+                  >
+                    {bulkGenerating ? <Loader2 className="animate-spin" size={20} /> : <Save size={20} />}
+                    {bulkGenerating ? 'Үүсгэж байна...' : `${bulkData.length} QR код үүсгэх`}
+                  </button>
+                  {error && <p className="mt-4 text-red-500 text-xs font-bold">{error}</p>}
                 </div>
+              ) : (
+                <>
+                  <div className="relative group w-full mb-6">
+                    <div className="absolute -top-3 left-1/2 -translate-x-1/2 z-10 bg-blue-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest shadow-lg">
+                      Preview
+                    </div>
+                    <div 
+                      className="qr-preview-box w-full aspect-square bg-white rounded-3xl shadow-inner border border-slate-100 flex justify-center items-center overflow-hidden p-6"
+                      style={{ maxWidth: '400px', margin: '0 auto' }}
+                    >
+                      <div ref={qrRef} className="w-full h-full flex items-center justify-center" />
+                    </div>
+                  </div>
+
+                  <div className="w-full bg-slate-50 p-4 rounded-2xl mb-6 border border-slate-100 overflow-hidden">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <div className="flex items-center gap-2 text-xs font-bold text-slate-400 uppercase tracking-tighter">
+                        <Globe size={12} /> QR доторх өгөгдөл
+                      </div>
+                      <div className="flex items-center gap-1 text-[10px] font-bold text-blue-500 bg-blue-50 px-1.5 py-0.5 rounded">
+                        <Monitor size={10} /> {config.size}px
+                      </div>
+                    </div>
+                    <p className="text-[11px] font-mono text-slate-600 break-all leading-relaxed bg-white p-2 rounded-lg border border-slate-50">
+                      {config.value}
+                    </p>
+                  </div>
+
+                  {slogan && (
+                    <div className="mb-6 px-4 py-3 bg-blue-50/50 rounded-2xl border border-blue-100/50 text-center w-full">
+                      <p className="text-slate-700 italic font-medium leading-relaxed">"{slogan}"</p>
+                    </div>
+                  )}
+
+                  <div className="w-full space-y-3">
+                    <button
+                      onClick={handleSave}
+                      disabled={saving}
+                      className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-2xl flex items-center justify-center gap-3 transition-all shadow-lg active:scale-[0.98] disabled:opacity-50"
+                    >
+                      {saving ? <Loader2 className="animate-spin" size={20} /> : <Save size={20} />}
+                      Системд Хадгалах
+                    </button>
+                    <div className="grid grid-cols-2 gap-3">
+                      <button onClick={downloadPNG} className="bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 font-bold py-3 rounded-2xl flex items-center justify-center gap-2 transition-all active:scale-[0.98]">
+                        <Download size={18} /> PNG
+                      </button>
+                      <button onClick={copyToClipboard} className="bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 font-bold py-3 rounded-2xl flex items-center justify-center gap-2 transition-all active:scale-[0.98]">
+                        <Copy size={18} /> Хуулах
+                      </button>
+                    </div>
+                  </div>
+                </>
               )}
-
-              <div className="w-full space-y-3">
-                <button
-                  onClick={handleSave}
-                  disabled={saving}
-                  className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-2xl flex items-center justify-center gap-3 transition-all shadow-lg active:scale-[0.98] disabled:opacity-50"
-                >
-                  {saving ? <Loader2 className="animate-spin" size={20} /> : <Save size={20} />}
-                  Системд Хадгалах
-                </button>
-                <div className="grid grid-cols-2 gap-3">
-                  <button onClick={downloadPNG} className="bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 font-bold py-3 rounded-2xl flex items-center justify-center gap-2 transition-all active:scale-[0.98]">
-                    <Download size={18} /> PNG
-                  </button>
-                  <button onClick={copyToClipboard} className="bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 font-bold py-3 rounded-2xl flex items-center justify-center gap-2 transition-all active:scale-[0.98]">
-                    <Copy size={18} /> Хуулах
-                  </button>
-                </div>
-              </div>
             </div>
           </div>
         </div>

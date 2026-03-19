@@ -69,6 +69,8 @@ export const EditQRModal: React.FC<EditQRModalProps> = ({ qr, onClose, onSaved }
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [expiresAt, setExpiresAt] = useState(qr.expires_at ? qr.expires_at.split('T')[0] : '');
+  const [usePassword, setUsePassword] = useState(!!qr.has_password);
+  const [qrPassword, setQrPassword] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -127,7 +129,7 @@ export const EditQRModal: React.FC<EditQRModalProps> = ({ qr, onClose, onSaved }
         finalTargetUrl = publicUrl;
       }
 
-      const updatePayload = {
+      const updatePayload: any = {
         title,
         description,
         target_url: finalTargetUrl,
@@ -139,6 +141,13 @@ export const EditQRModal: React.FC<EditQRModalProps> = ({ qr, onClose, onSaved }
                   qr.type === 'app' ? appData :
                   qr.type === 'event' ? eventData : null
       };
+
+      if (usePassword && qrPassword) {
+        updatePayload.config = { ...qr.config, password: qrPassword };
+      } else if (!usePassword && qr.has_password) {
+        const { password, ...safeConfig } = qr.config as any;
+        updatePayload.config = { ...safeConfig, password: null };
+      }
 
       const response = await fetch(`/api/qr-codes/${qr.id}`, {
         method: 'PATCH',
@@ -557,6 +566,34 @@ export const EditQRModal: React.FC<EditQRModalProps> = ({ qr, onClose, onSaved }
                 className="w-full p-3 pl-10 bg-slate-50 border border-slate-100 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all text-sm"
               />
             </div>
+          </div>
+
+          <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
+            <label className="flex items-center gap-3 cursor-pointer">
+              <div className="relative flex items-center">
+                <input 
+                  type="checkbox" 
+                  checked={usePassword}
+                  onChange={(e) => setUsePassword(e.target.checked)}
+                  className="peer sr-only"
+                />
+                <div className="w-10 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+              </div>
+              <span className="text-sm font-bold text-slate-700">Нууц үгээр хамгаалах</span>
+            </label>
+            
+            {usePassword && (
+              <div className="mt-4">
+                <label className="block text-xs font-bold text-slate-500 uppercase mb-1 ml-1">Нууц үг</label>
+                <input 
+                  type="text" 
+                  placeholder={qr.has_password ? "Шинэ нууц үг (хоосон орхивол хуучин хэвээр үлдэнэ)" : "Нууц үг оруулах"}
+                  value={qrPassword}
+                  onChange={(e) => setQrPassword(e.target.value)}
+                  className="w-full p-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all text-sm"
+                />
+              </div>
+            )}
           </div>
         </div>
 

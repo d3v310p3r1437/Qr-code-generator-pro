@@ -21,10 +21,19 @@ export const FileViewer: React.FC = () => {
   useEffect(() => {
     const fetchFile = async () => {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000);
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
       try {
         const response = await fetch(`/api/public/qr-codes/${id}`, { signal: controller.signal });
         clearTimeout(timeoutId);
+        
+        if (response.status === 401) {
+          const data = await response.json();
+          if (data.require_password) {
+            window.location.href = `/secure/${id}`;
+            return;
+          }
+        }
+        
         if (!response.ok) throw new Error('Файл олдсонгүй');
         const data = await response.json();
         setFileData(data);

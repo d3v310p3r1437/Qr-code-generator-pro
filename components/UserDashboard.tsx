@@ -16,7 +16,8 @@ import {
   CheckCircle2,
   Download,
   Copy,
-  Edit3
+  Edit3,
+  Lock
 } from 'lucide-react';
 import { EditQRModal } from './EditQRModal';
 
@@ -34,7 +35,7 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({ profile, onNewQR }
   const fetchQRs = async () => {
     setLoading(true);
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000);
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
@@ -212,13 +213,18 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({ profile, onNewQR }
                   
                   <div className="flex gap-4 mb-4">
                     {qr.qr_image_url && (
-                      <div className="w-20 h-20 bg-white rounded-2xl border border-slate-100 p-1.5 flex-shrink-0 shadow-sm">
+                      <div className="w-20 h-20 bg-white rounded-2xl border border-slate-100 p-1.5 flex-shrink-0 shadow-sm relative">
                         <img 
                           src={qr.qr_image_url} 
                           alt={qr.title} 
                           className="w-full h-full object-contain" 
                           referrerPolicy="no-referrer" 
                         />
+                        {qr.has_password && (
+                          <div className="absolute -top-2 -right-2 bg-blue-600 text-white p-1 rounded-full shadow-md" title="Нууц үгээр хамгаалагдсан">
+                            <Lock size={12} />
+                          </div>
+                        )}
                       </div>
                     )}
                     <div className="flex-1 min-w-0">

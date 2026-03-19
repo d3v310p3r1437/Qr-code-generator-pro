@@ -56,14 +56,19 @@ export const BioPage: React.FC = () => {
       }
 
       try {
-        const { data, error } = await publicSupabase
-          .from('qr_codes')
-          .select('*')
-          .eq('id', id)
-          .single();
-
-        if (error) throw error;
-        if (!data) throw new Error('Хуудас олдсонгүй');
+        const response = await fetch(`/api/public/qr-codes/${id}`);
+        
+        if (response.status === 401) {
+          const data = await response.json();
+          if (data.require_password) {
+            window.location.href = `/secure/${id}`;
+            return;
+          }
+        }
+        
+        if (!response.ok) throw new Error('Хуудас олдсонгүй');
+        const data = await response.json();
+        
         if (data.type !== 'bio' || !data.bio_data) throw new Error('Энэ QR код мини-вэб биш байна');
 
         setQr(data);
