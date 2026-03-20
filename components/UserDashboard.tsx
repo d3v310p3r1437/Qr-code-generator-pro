@@ -53,9 +53,9 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({ profile, onNewQR }
     } catch (err: any) {
       clearTimeout(timeoutId);
       console.error('Fetch error:', err);
-      if (err.message?.includes('Refresh Token')) {
+      if (err.message?.toLowerCase().includes('refresh token')) {
         alert('Таны нэвтрэх хугацаа дууссан байна. Дахин нэвтэрнэ үү.');
-        await supabase.auth.signOut();
+        await supabase.auth.signOut().catch(console.error);
       }
     } finally {
       setLoading(false);
@@ -87,9 +87,9 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({ profile, onNewQR }
 
       setQrs(prev => prev.filter(qr => qr.id !== id));
     } catch (err: any) {
-      if (err.message?.includes('Refresh Token')) {
+      if (err.message?.toLowerCase().includes('refresh token')) {
         alert('Таны нэвтрэх хугацаа дууссан байна. Дахин нэвтэрнэ үү.');
-        await supabase.auth.signOut();
+        await supabase.auth.signOut().catch(console.error);
       } else {
         alert('Устгахад алдаа гарлаа: ' + err.message);
       }

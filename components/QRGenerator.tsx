@@ -527,9 +527,9 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
     } catch (err: any) {
       clearTimeout(timeoutId);
       console.error('Save error:', err);
-      if (err.message?.includes('Refresh Token')) {
+      if (err.message?.toLowerCase().includes('refresh token')) {
         alert('Таны нэвтрэх хугацаа дууссан байна. Дахин нэвтэрнэ үү.');
-        await supabase.auth.signOut();
+        await supabase.auth.signOut().catch(console.error);
       } else {
         alert('Алдаа: ' + (err.name === 'AbortError' ? 'Холболт салсан байна (Timeout)' : err.message));
       }

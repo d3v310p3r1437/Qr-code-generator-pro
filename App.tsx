@@ -54,8 +54,8 @@ const App: React.FC = () => {
         
         if (result.error) {
           console.error('[Auth] Session error:', result.error.message);
-          if (result.error.message?.includes('Refresh Token')) {
-            await supabase.auth.signOut();
+          if (result.error.message?.toLowerCase().includes('refresh token')) {
+            await supabase.auth.signOut().catch(console.error);
           }
         }
         
@@ -69,8 +69,8 @@ const App: React.FC = () => {
       } catch (err: any) {
         if (mounted) {
           if (err.message?.includes('Settings')) setConfigError(err.message);
-          if (err.message?.includes('Refresh Token')) {
-            await supabase.auth.signOut();
+          if (err.message?.toLowerCase().includes('refresh token')) {
+            await supabase.auth.signOut().catch(console.error);
           }
           setLoading(false);
         }
@@ -154,7 +154,7 @@ const App: React.FC = () => {
   };
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
+    await supabase.auth.signOut().catch(console.error);
     navigate('/');
   };
 

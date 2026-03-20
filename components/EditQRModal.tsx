@@ -172,9 +172,9 @@ export const EditQRModal: React.FC<EditQRModalProps> = ({ qr, onClose, onSaved }
     } catch (err: any) {
       clearTimeout(timeoutId);
       console.error('Update error:', err);
-      if (err.message?.includes('Refresh Token')) {
+      if (err.message?.toLowerCase().includes('refresh token')) {
         setError('Таны нэвтрэх хугацаа дууссан байна. Дахин нэвтэрнэ үү.');
-        await supabase.auth.signOut();
+        await supabase.auth.signOut().catch(console.error);
       } else {
         setError(err.name === 'AbortError' ? 'Холболт салсан байна (Timeout)' : err.message);
       }

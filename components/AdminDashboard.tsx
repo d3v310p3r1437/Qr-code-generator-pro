@@ -70,9 +70,9 @@ export const AdminDashboard: React.FC<{ profile: UserProfile }> = ({ profile }) 
     } catch (err: any) {
       clearTimeout(timeoutId);
       console.error('Fetch error:', err);
-      if (err.message?.includes('Refresh Token')) {
+      if (err.message?.toLowerCase().includes('refresh token')) {
         alert('Таны нэвтрэх хугацаа дууссан байна. Дахин нэвтэрнэ үү.');
-        await supabase.auth.signOut();
+        await supabase.auth.signOut().catch(console.error);
       }
     } finally {
       setLoading(false);
@@ -105,9 +105,9 @@ export const AdminDashboard: React.FC<{ profile: UserProfile }> = ({ profile }) 
       setUsers(prev => prev.map(u => u.id === id ? { ...u, ...data } : u));
       alert('Хэрэглэгч амжилттай шинэчлэгдлээ');
     } catch (err: any) {
-      if (err.message?.includes('Refresh Token')) {
+      if (err.message?.toLowerCase().includes('refresh token')) {
         alert('Таны нэвтрэх хугацаа дууссан байна. Дахин нэвтэрнэ үү.');
-        await supabase.auth.signOut();
+        await supabase.auth.signOut().catch(console.error);
       } else {
         throw err;
       }
@@ -149,9 +149,9 @@ export const AdminDashboard: React.FC<{ profile: UserProfile }> = ({ profile }) 
       
       alert('Хэрэглэгч амжилттай бүртгэгдлээ');
     } catch (err: any) {
-      if (err.message?.includes('Refresh Token')) {
+      if (err.message?.toLowerCase().includes('refresh token')) {
         setError('Таны нэвтрэх хугацаа дууссан байна. Дахин нэвтэрнэ үү.');
-        await supabase.auth.signOut();
+        await supabase.auth.signOut().catch(console.error);
       } else {
         setError(err.message);
       }
@@ -179,9 +179,9 @@ export const AdminDashboard: React.FC<{ profile: UserProfile }> = ({ profile }) 
 
       setAllQrs(prev => prev.filter(qr => qr.id !== id));
     } catch (err: any) {
-      if (err.message?.includes('Refresh Token')) {
+      if (err.message?.toLowerCase().includes('refresh token')) {
         alert('Таны нэвтрэх хугацаа дууссан байна. Дахин нэвтэрнэ үү.');
-        await supabase.auth.signOut();
+        await supabase.auth.signOut().catch(console.error);
       } else {
         alert('Устгахад алдаа гарлаа: ' + err.message);
       }
@@ -204,9 +204,9 @@ export const AdminDashboard: React.FC<{ profile: UserProfile }> = ({ profile }) 
       }
       setUsers(prev => prev.filter(user => user.id !== id));
     } catch (err: any) {
-      if (err.message?.includes('Refresh Token')) {
+      if (err.message?.toLowerCase().includes('refresh token')) {
         alert('Таны нэвтрэх хугацаа дууссан байна. Дахин нэвтэрнэ үү.');
-        await supabase.auth.signOut();
+        await supabase.auth.signOut().catch(console.error);
       } else {
         alert('Алдаа: ' + err.message);
       }
@@ -247,9 +247,9 @@ export const AdminDashboard: React.FC<{ profile: UserProfile }> = ({ profile }) 
       alert(`${result.synced} QR кодын тоог амжилттай шинэчиллээ.`);
       fetchData();
     } catch (err: any) {
-      if (err.message?.includes('Refresh Token')) {
+      if (err.message?.toLowerCase().includes('refresh token')) {
         alert('Таны нэвтрэх хугацаа дууссан байна. Дахин нэвтэрнэ үү.');
-        await supabase.auth.signOut();
+        await supabase.auth.signOut().catch(console.error);
       } else {
         alert('Алдаа: ' + err.message);
       }
