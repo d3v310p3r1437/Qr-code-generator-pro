@@ -1,5 +1,5 @@
 
-export type QRDataType = 'url' | 'text' | 'wifi' | 'file' | 'bio' | 'vcard' | 'app' | 'event' | 'vcard_bulk';
+export type QRDataType = 'url' | 'text' | 'wifi' | 'file' | 'bio' | 'vcard' | 'app' | 'event' | 'vcard_bulk' | 'phone';
 
 export interface VCardData {
   firstName: string;

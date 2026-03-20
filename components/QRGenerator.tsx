@@ -98,6 +98,7 @@ interface QRGeneratorProps {
 export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved }) => {
   const [activeTab, setActiveTab] = useState<QRDataType>('url');
   const [url, setUrl] = useState<string>('https://google.com');
+  const [phone, setPhone] = useState<string>('');
   const [text, setText] = useState<string>('');
   const [wifi, setWifi] = useState({ ssid: '', password: '', encryption: 'WPA' });
   const [file, setFile] = useState<File | null>(null);
@@ -247,6 +248,7 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
   const getQRValue = () => {
     if (activeTab === 'url') return normalizedUrlValue;
     if (activeTab === 'text') return text;
+    if (activeTab === 'phone') return phone ? `tel:${phone}` : '';
     if (activeTab === 'wifi') return `WIFI:S:${wifi.ssid};T:${wifi.encryption};P:${wifi.password};;`;
     if (activeTab === 'file') return `${window.location.origin}/view/preview`;
     if (activeTab === 'bio') return `${window.location.origin}/p/preview`;
@@ -668,6 +670,7 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
             {[
               { id: 'url', icon: LinkIcon, label: 'Вэб сайт' },
               { id: 'text', icon: FileText, label: 'Текст' },
+              { id: 'phone', icon: Phone, label: 'Утас' },
               { id: 'wifi', icon: Wifi, label: 'Wi-Fi' },
               { id: 'file', icon: Upload, label: 'Файл/Зураг' },
               { id: 'bio', icon: Layout, label: 'Mini-Web' },
@@ -717,6 +720,20 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
                 rows={3}
                 className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none resize-none transition-all"
               />
+            )}
+            {activeTab === 'phone' && (
+              <div className="space-y-3">
+                <div className="relative">
+                  <input
+                    type="tel"
+                    placeholder="Утасны дугаар (Жишээ: 99112233)"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    className="w-full px-4 py-3 pl-11 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                  />
+                  <Phone className="absolute left-4 top-3.5 text-slate-400" size={20} />
+                </div>
+              </div>
             )}
             {activeTab === 'wifi' && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

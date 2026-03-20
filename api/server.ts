@@ -406,14 +406,12 @@ apiRouter.post('/qr-codes/bulk', requireAuth, async (req, res) => {
     const results = [];
     
     for (const item of items) {
-      const vcardString = `BEGIN:VCARD\nVERSION:3.0\nN:${item.lastName || ''};${item.firstName || ''};;;\nFN:${item.firstName || ''} ${item.lastName || ''}\nORG:${item.organization || ''}${item.department ? ';' + item.department : ''}\nTITLE:${item.title || ''}\nTEL;TYPE=WORK,VOICE:${item.phone || ''}\nTEL;TYPE=CELL,VOICE:${item.personalPhone || ''}\nEMAIL;TYPE=PREF,INTERNET:${item.email || ''}\nURL:${item.website || ''}\nADR;TYPE=WORK:;;${item.address || ''};;;;\nEND:VCARD`;
-      
       // Insert DB record first to get ID
       const qrRecord = {
         user_id: user.id,
         title: `${item.firstName || ''} ${item.lastName || ''}`.trim() || 'vCard',
         type: 'vcard',
-        value: vcardString,
+        target_url: '',
         bio_data: item,
         config: processedConfig
       };
@@ -898,25 +896,27 @@ app.get('/r/:id', scanLimiter, async (req, res, next) => {
     
     console.log(`[Redirect] Request for QR ${id} from IP ${ip}, Purpose: ${purpose}, UA: ${userAgent}`);
     
+    let shouldLog = true;
+    
     // Skip logging for prefetch requests
     if (purpose === 'prefetch' || purpose === 'preview') {
       console.log(`[Redirect] Skipping log for prefetch/preview request for QR ${id}`);
-      const redirectPath = qr.type === 'file' ? `/view/${id}` : (qr.type === 'bio' ? `/p/${id}` : qr.target_url);
-      return res.redirect(redirectPath);
-    }
-
-    // Debounce: prevent double logging from the same IP within 2 seconds
-    const scanKey = `${ip}-${id}`;
-    const now = Date.now();
-    if (recentScans.has(scanKey)) {
-      const lastScan = recentScans.get(scanKey)!;
-      if (now - lastScan < DEBOUNCE_WINDOW) {
-        console.log(`[Redirect] Skipping duplicate scan for QR ${id} from IP ${ip} (within ${DEBOUNCE_WINDOW}ms)`);
-        const redirectPath = qr.type === 'file' ? `/view/${id}` : (qr.type === 'bio' ? `/p/${id}` : qr.target_url);
-        return res.redirect(redirectPath);
+      shouldLog = false;
+    } else {
+      // Debounce: prevent double logging from the same IP within 2 seconds
+      const scanKey = `${ip}-${id}`;
+      const now = Date.now();
+      if (recentScans.has(scanKey)) {
+        const lastScan = recentScans.get(scanKey)!;
+        if (now - lastScan < DEBOUNCE_WINDOW) {
+          console.log(`[Redirect] Skipping duplicate scan for QR ${id} from IP ${ip} (within ${DEBOUNCE_WINDOW}ms)`);
+          shouldLog = false;
+        }
+      }
+      if (shouldLog) {
+        recentScans.set(scanKey, now);
       }
     }
-    recentScans.set(scanKey, now);
 
     const scanLogData: any = { 
       qr_code_id: id,
@@ -1043,7 +1043,7 @@ app.get('/r/:id', scanLimiter, async (req, res, next) => {
 
     // Run updates in background
     // Use a simple flag on the request object to prevent double-execution if middleware or other factors cause it
-    if (!(req as any)._scanLogged) {
+    if (shouldLog && !(req as any)._scanLogged) {
       (req as any)._scanLogged = true;
       updateScanCount();
       logScan();

@@ -15,6 +15,7 @@ export const EditQRModal: React.FC<EditQRModalProps> = ({ qr, onClose, onSaved }
   const [description, setDescription] = useState(qr.description);
   const [targetUrl, setTargetUrl] = useState(qr.type === 'url' ? qr.target_url : '');
   const [text, setText] = useState(qr.type === 'text' ? qr.target_url : '');
+  const [phone, setPhone] = useState(qr.type === 'phone' ? qr.target_url.replace('tel:', '') : '');
   
   const [wifi, setWifi] = useState(() => {
     if (qr.type === 'wifi') {
@@ -94,6 +95,8 @@ export const EditQRModal: React.FC<EditQRModalProps> = ({ qr, onClose, onSaved }
         finalTargetUrl = targetUrl;
       } else if (qr.type === 'text') {
         finalTargetUrl = text;
+      } else if (qr.type === 'phone') {
+        finalTargetUrl = `tel:${phone}`;
       } else if (qr.type === 'wifi') {
         finalTargetUrl = `WIFI:T:${wifi.encryption};S:${wifi.ssid};P:${wifi.password};;`;
       } else if (qr.type === 'bio' && bioImage) {
@@ -242,6 +245,18 @@ export const EditQRModal: React.FC<EditQRModalProps> = ({ qr, onClose, onSaved }
                 value={text}
                 onChange={(e) => setText(e.target.value)}
                 className="w-full p-3 bg-slate-50 border border-slate-100 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all h-24 resize-none"
+              />
+            </div>
+          )}
+
+          {qr.type === 'phone' && (
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase mb-1 ml-1">Утасны дугаар</label>
+              <input 
+                type="tel" 
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                className="w-full p-3 bg-slate-50 border border-slate-100 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all"
               />
             </div>
           )}

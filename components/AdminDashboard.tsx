@@ -40,7 +40,7 @@ export const AdminDashboard: React.FC<{ profile: UserProfile }> = ({ profile }) 
   const [password, setPassword] = useState('');
   const [role, setRole] = useState<'admin' | 'user'>('user');
   const [qrLimit, setQrLimit] = useState(10);
-  const [allowedQrTypes, setAllowedQrTypes] = useState<QRDataType[]>(['url', 'text', 'wifi', 'file', 'bio', 'vcard', 'app', 'event']);
+  const [allowedQrTypes, setAllowedQrTypes] = useState<QRDataType[]>(['url', 'text', 'phone', 'wifi', 'file', 'bio', 'vcard', 'app', 'event']);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
@@ -139,7 +139,7 @@ export const AdminDashboard: React.FC<{ profile: UserProfile }> = ({ profile }) 
       setPassword('');
       setQrLimit(10);
       setRole('user');
-      setAllowedQrTypes(['url', 'text', 'wifi', 'file', 'bio', 'vcard', 'app', 'event']);
+      setAllowedQrTypes(['url', 'text', 'phone', 'wifi', 'file', 'bio', 'vcard', 'app', 'event']);
       
       if (activeTab === 'users') {
         setUsers(prev => [result.user, ...prev]);
@@ -346,6 +346,7 @@ export const AdminDashboard: React.FC<{ profile: UserProfile }> = ({ profile }) 
                   {[
                     { id: 'url', label: 'Холбоос' },
                     { id: 'text', label: 'Текст' },
+                    { id: 'phone', label: 'Утас' },
                     { id: 'wifi', label: 'WiFi' },
                     { id: 'file', label: 'Файл' },
                     { id: 'bio', label: 'Bio Link' },
