@@ -4,11 +4,15 @@ import { Routes, Route, useNavigate, Navigate, useLocation } from 'react-router-
 import { supabase } from './services/supabaseClient';
 import { UserProfile } from './types';
 import { AuthView } from './components/AuthView';
-import { AdminDashboard } from './components/AdminDashboard';
-import { UserDashboard } from './components/UserDashboard';
-import { QRGenerator } from './components/QRGenerator';
 import { RedirectHandler } from './components/RedirectHandler';
-import { ProfileSettings } from './components/ProfileSettings';
+
+const AdminDashboard = React.lazy(() => import('./components/AdminDashboard').then(module => ({ default: module.AdminDashboard })));
+const UserDashboard = React.lazy(() => import('./components/UserDashboard').then(module => ({ default: module.UserDashboard })));
+const QRGenerator = React.lazy(() => import('./components/QRGenerator').then(module => ({ default: module.QRGenerator })));
+const ProfileSettings = React.lazy(() => import('./components/ProfileSettings').then(module => ({ default: module.ProfileSettings })));
+const FileViewer = React.lazy(() => import('./components/FileViewer').then(module => ({ default: module.FileViewer })));
+const BioPage = React.lazy(() => import('./components/BioPage').then(module => ({ default: module.BioPage })));
+const SecureQR = React.lazy(() => import('./components/SecureQR').then(module => ({ default: module.SecureQR })));
 import { 
   LogOut, 
   LayoutDashboard, 
@@ -21,10 +25,6 @@ import {
   X,
   PlusCircle
 } from 'lucide-react';
-
-import { FileViewer } from './components/FileViewer';
-import { BioPage } from './components/BioPage';
-import { SecureQR } from './components/SecureQR';
 
 const App: React.FC = () => {
   const [session, setSession] = useState<any>(null);
@@ -233,7 +233,11 @@ const App: React.FC = () => {
   if (location.pathname.startsWith('/view/')) {
     return (
       <Routes>
-        <Route path="/view/:id" element={<FileViewer />} />
+        <Route path="/view/:id" element={
+          <React.Suspense fallback={<div className="flex justify-center items-center h-screen"><Loader2 className="w-8 h-8 animate-spin text-blue-600" /></div>}>
+            <FileViewer />
+          </React.Suspense>
+        } />
       </Routes>
     );
   }
@@ -241,7 +245,11 @@ const App: React.FC = () => {
   if (location.pathname.startsWith('/p/')) {
     return (
       <Routes>
-        <Route path="/p/:id" element={<BioPage />} />
+        <Route path="/p/:id" element={
+          <React.Suspense fallback={<div className="flex justify-center items-center h-screen"><Loader2 className="w-8 h-8 animate-spin text-blue-600" /></div>}>
+            <BioPage />
+          </React.Suspense>
+        } />
       </Routes>
     );
   }
@@ -249,7 +257,11 @@ const App: React.FC = () => {
   if (location.pathname.startsWith('/secure/')) {
     return (
       <Routes>
-        <Route path="/secure/:id" element={<SecureQR />} />
+        <Route path="/secure/:id" element={
+          <React.Suspense fallback={<div className="flex justify-center items-center h-screen"><Loader2 className="w-8 h-8 animate-spin text-blue-600" /></div>}>
+            <SecureQR />
+          </React.Suspense>
+        } />
       </Routes>
     );
   }
@@ -337,26 +349,32 @@ const App: React.FC = () => {
 
       {/* Main Content */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {view === 'dashboard' && (
-          profile.role === 'admin' ? (
-            <AdminDashboard profile={profile} />
-          ) : (
-            <UserDashboard 
-              profile={profile} 
-              onNewQR={() => setView('generator')} 
+        <React.Suspense fallback={
+          <div className="flex justify-center items-center h-64">
+            <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+          </div>
+        }>
+          {view === 'dashboard' && (
+            profile.role === 'admin' ? (
+              <AdminDashboard profile={profile} />
+            ) : (
+              <UserDashboard 
+                profile={profile} 
+                onNewQR={() => setView('generator')} 
+              />
+            )
+          )}
+          {view === 'generator' && (
+            <QRGenerator 
+              user={profile} 
+              onBack={() => setView('dashboard')} 
+              onSaved={() => setView('dashboard')}
             />
-          )
-        )}
-        {view === 'generator' && (
-          <QRGenerator 
-            user={profile} 
-            onBack={() => setView('dashboard')} 
-            onSaved={() => setView('dashboard')}
-          />
-        )}
-        {view === 'settings' && (
-          <ProfileSettings profile={profile} />
-        )}
+          )}
+          {view === 'settings' && (
+            <ProfileSettings profile={profile} />
+          )}
+        </React.Suspense>
       </main>
 
       <footer className="py-8 text-center text-slate-400 text-[10px] tracking-widest uppercase">

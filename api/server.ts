@@ -383,7 +383,7 @@ apiRouter.post('/qr-codes/bulk', requireAuth, async (req, res) => {
       }
     }
 
-    const { items, config } = req.body;
+    const { items, config, client_generation } = req.body;
     if (!items || !Array.isArray(items)) {
       return res.status(400).json({ error: 'Invalid items array' });
     }
@@ -418,6 +418,11 @@ apiRouter.post('/qr-codes/bulk', requireAuth, async (req, res) => {
       
       const { data: insertedQr, error: insertError } = await admin.from('qr_codes').insert(qrRecord).select().single();
       if (insertError) throw insertError;
+      
+      if (client_generation) {
+        results.push(insertedQr);
+        continue;
+      }
       
       // Generate QR Image
       const targetUrl = `${req.protocol}://${req.get('host')}/r/${insertedQr.id}`;

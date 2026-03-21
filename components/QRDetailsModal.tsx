@@ -44,8 +44,8 @@ export const QRDetailsModal: React.FC<QRDetailsModalProps> = ({ qr, onClose }) =
   const [viewMode, setViewMode] = useState<'day' | 'month'>('day');
 
   useEffect(() => {
-    const fetchAnalytics = async () => {
-      setLoading(true);
+    const fetchAnalytics = async (silent = false) => {
+      if (!silent) setLoading(true);
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 30000);
       try {
@@ -62,14 +62,24 @@ export const QRDetailsModal: React.FC<QRDetailsModalProps> = ({ qr, onClose }) =
         if (!response.ok) throw new Error('Failed to fetch analytics');
         const data = await response.json();
         setAnalytics(data);
-      } catch (err) {
+      } catch (err: any) {
         clearTimeout(timeoutId);
-        console.error('Analytics error:', err);
+        if (err.name !== 'AbortError') {
+          console.error('Analytics error:', err);
+        }
       } finally {
-        setLoading(false);
+        if (!silent) setLoading(false);
       }
     };
+    
     fetchAnalytics();
+    
+    // Realtime polling every 5 seconds
+    const intervalId = setInterval(() => {
+      fetchAnalytics(true);
+    }, 5000);
+    
+    return () => clearInterval(intervalId);
   }, [qr.id]);
 
   const processData = () => {

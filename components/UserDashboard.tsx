@@ -64,6 +64,32 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({ profile, onNewQR }
 
   useEffect(() => {
     fetchQRs();
+
+    const channel = supabase
+      .channel('user-qrs-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'qr_codes',
+          filter: `user_id=eq.${profile.id}`
+        },
+        (payload: any) => {
+          if (payload.eventType === 'INSERT') {
+            setQrs((prev) => [payload.new as QRCodeData, ...prev]);
+          } else if (payload.eventType === 'UPDATE') {
+            setQrs((prev) => prev.map(qr => qr.id === payload.new.id ? { ...qr, ...payload.new } : qr));
+          } else if (payload.eventType === 'DELETE') {
+            setQrs((prev) => prev.filter(qr => qr.id !== payload.old.id));
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [profile.id]);
 
   const handleDelete = async (id: string, imageUrl?: string) => {

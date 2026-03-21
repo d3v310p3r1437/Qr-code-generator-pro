@@ -330,7 +330,7 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
         address: row['Хаяг'] || ''
       }));
 
-      // We can send all items to the backend and let it handle the generation
+      // 1. Send items to backend to create DB records
       const response = await fetch('/api/qr-codes/bulk', {
         method: 'POST',
         headers: {
@@ -339,7 +339,8 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
         },
         body: JSON.stringify({
           items,
-          config
+          config,
+          client_generation: true
         })
       });
 
@@ -348,7 +349,64 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
         throw new Error(result.error || 'Бөөнөөр үүсгэхэд алдаа гарлаа');
       }
 
-      setBulkProgress(100);
+      const qrCodes = await response.json();
+
+      // 2. Generate images on client and upload
+      for (let i = 0; i < qrCodes.length; i++) {
+        const qr = qrCodes[i];
+        const targetUrl = `${window.location.origin}/r/${qr.id}`;
+        
+        const tempQrInstance = new QRCodeStyling({
+          width: config.size,
+          height: config.size,
+          data: targetUrl,
+          image: config.logoSrc,
+          margin: 10,
+          qrOptions: { errorCorrectionLevel: config.level as any },
+          dotsOptions: { color: config.fgColor, type: config.dotsStyle },
+          backgroundOptions: { color: config.bgColor },
+          cornersSquareOptions: { type: config.cornersStyle, color: config.fgColor },
+          cornersDotOptions: { type: config.cornersStyle === 'dot' ? 'dot' : 'square', color: config.fgColor },
+          imageOptions: {
+            crossOrigin: "anonymous",
+            hideBackgroundDots: config.excavate,
+            imageSize: (config.logoSize || 80) / config.size,
+            margin: 5
+          }
+        });
+
+        const blob = await tempQrInstance.getRawData('png');
+        if (!blob) throw new Error('QR код үүсгэж чадсангүй');
+
+        const qrFileName = `${qr.id}.png`;
+        const { error: qrUploadError } = await supabase.storage
+          .from('qrcodes')
+          .upload(qrFileName, blob, {
+            contentType: 'image/png',
+            upsert: true
+          });
+
+        if (qrUploadError) throw new Error('QR зураг хуулахад алдаа гарлаа: ' + qrUploadError.message);
+
+        const { data: { publicUrl } } = supabase.storage
+          .from('qrcodes')
+          .getPublicUrl(qrFileName);
+
+        await fetch(`/api/qr-codes/${qr.id}`, {
+          method: 'PATCH',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ 
+            qr_image_url: publicUrl,
+            target_url: targetUrl
+          })
+        });
+
+        setBulkProgress(Math.round(((i + 1) / qrCodes.length) * 100));
+      }
+
       alert(`${items.length} ширхэг QR код амжилттай үүслээ!`);
       onSaved();
     } catch (err: any) {

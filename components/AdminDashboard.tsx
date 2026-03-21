@@ -81,6 +81,52 @@ export const AdminDashboard: React.FC<{ profile: UserProfile }> = ({ profile }) 
 
   useEffect(() => {
     fetchData();
+
+    let channel: any;
+
+    if (activeTab === 'users') {
+      channel = supabase
+        .channel('admin-users-changes')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'profiles' },
+          (payload: any) => {
+            if (payload.eventType === 'INSERT') {
+              setUsers((prev) => [payload.new as UserProfile, ...prev]);
+            } else if (payload.eventType === 'UPDATE') {
+              setUsers((prev) => prev.map(u => u.id === payload.new.id ? { ...u, ...payload.new } : u));
+            } else if (payload.eventType === 'DELETE') {
+              setUsers((prev) => prev.filter(u => u.id !== payload.old.id));
+            }
+          }
+        )
+        .subscribe();
+    } else if (activeTab === 'qrs') {
+      channel = supabase
+        .channel('admin-qrs-changes')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'qr_codes' },
+          (payload: any) => {
+            if (payload.eventType === 'INSERT') {
+              // Note: payload.new won't have the joined profile email, so we might need to fetch it or just use a placeholder
+              const newQr = { ...payload.new, profiles: { email: 'Шинэ код (refresh хийнэ үү)' } } as any;
+              setAllQrs((prev) => [newQr, ...prev]);
+            } else if (payload.eventType === 'UPDATE') {
+              setAllQrs((prev) => prev.map(qr => qr.id === payload.new.id ? { ...qr, ...payload.new } : qr));
+            } else if (payload.eventType === 'DELETE') {
+              setAllQrs((prev) => prev.filter(qr => qr.id !== payload.old.id));
+            }
+          }
+        )
+        .subscribe();
+    }
+
+    return () => {
+      if (channel) {
+        supabase.removeChannel(channel);
+      }
+    };
   }, [activeTab]);
 
   const handleUpdateUser = async (id: string, data: Partial<UserProfile>) => {
