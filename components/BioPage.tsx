@@ -4,6 +4,7 @@ import { useParams } from 'react-router-dom';
 import { QRCodeData } from '../types';
 import { supabase, publicSupabase } from '../services/supabaseClient';
 import { motion } from 'framer-motion';
+import DOMPurify from 'dompurify';
 import { 
   Instagram, 
   Facebook, 
@@ -156,7 +157,7 @@ export const BioPage: React.FC = () => {
             className="text-2xl font-black mb-2"
             style={{ color: bio_data.text_color || '#0f172a' }}
           >
-            {bio_data.name}
+            {DOMPurify.sanitize(bio_data.name, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] })}
           </h1>
 
           {(bio_data.position || bio_data.company) && (
@@ -167,13 +168,13 @@ export const BioPage: React.FC = () => {
               {bio_data.position && (
                 <div className="flex items-center gap-1.5">
                   <Briefcase size={14} />
-                  <span>{bio_data.position}</span>
+                  <span>{DOMPurify.sanitize(bio_data.position, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] })}</span>
                 </div>
               )}
               {bio_data.company && (
                 <div className="flex items-center gap-1.5">
                   <Building2 size={14} />
-                  <span>{bio_data.company}</span>
+                  <span>{DOMPurify.sanitize(bio_data.company, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] })}</span>
                 </div>
               )}
             </div>
@@ -183,7 +184,7 @@ export const BioPage: React.FC = () => {
             className="text-sm opacity-80 leading-relaxed max-w-xs mx-auto"
             style={{ color: bio_data.text_color || '#475569' }}
           >
-            {bio_data.bio}
+            {DOMPurify.sanitize(bio_data.bio, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] })}
           </p>
         </motion.div>
 
@@ -214,6 +215,11 @@ export const BioPage: React.FC = () => {
               href = `https://${href}`;
             }
 
+            // Sanitize URL to prevent XSS
+            href = DOMPurify.sanitize(href, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] });
+            // DOMPurify might return empty string if it's a javascript: link, so we fallback to #
+            if (!href) href = '#';
+
             return (
               <motion.a
                 key={link.id}
@@ -235,9 +241,9 @@ export const BioPage: React.FC = () => {
                   <Icon size={20} />
                 </div>
                 <div className="flex-1 flex items-center gap-2 overflow-hidden">
-                  <span className="font-bold text-sm whitespace-nowrap">{link.label}</span>
+                  <span className="font-bold text-sm whitespace-nowrap">{DOMPurify.sanitize(link.label, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] })}</span>
                   {(link.icon === 'mail' || link.icon === 'phone') && link.url && (
-                    <span className="text-xs opacity-70 font-medium truncate">{link.url}</span>
+                    <span className="text-xs opacity-70 font-medium truncate">{DOMPurify.sanitize(link.url, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] })}</span>
                   )}
                 </div>
                 <ExternalLink size={16} className="opacity-30 group-hover:opacity-100 transition-opacity" />

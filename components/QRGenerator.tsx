@@ -152,6 +152,11 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [expiresAt, setExpiresAt] = useState('');
+  const [scanLimit, setScanLimit] = useState('');
+  const [useRouting, setUseRouting] = useState(false);
+  const [routingRules, setRoutingRules] = useState<{startTime: string, endTime: string, url: string}[]>([
+    { startTime: '08:00', endTime: '12:00', url: '' }
+  ]);
   const [usePassword, setUsePassword] = useState(false);
   const [qrPassword, setQrPassword] = useState('');
   
@@ -181,6 +186,28 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
     dotsStyle: 'square',
     cornersStyle: 'square',
   });
+
+  const [savedTemplates, setSavedTemplates] = useState<QRConfig[]>([]);
+
+  useEffect(() => {
+    const templates = localStorage.getItem('qr_templates');
+    if (templates) {
+      try {
+        setSavedTemplates(JSON.parse(templates));
+      } catch (e) {}
+    }
+  }, []);
+
+  const saveTemplate = () => {
+    const newTemplates = [...savedTemplates, config];
+    setSavedTemplates(newTemplates);
+    localStorage.setItem('qr_templates', JSON.stringify(newTemplates));
+    alert('Загвар амжилттай хадгалагдлаа!');
+  };
+
+  const loadTemplate = (template: QRConfig) => {
+    setConfig(template);
+  };
 
   const qrRef = useRef<HTMLDivElement>(null);
   const qrCodeInstance = useRef<QRCodeStyling | null>(null);
@@ -351,60 +378,70 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
 
       const qrCodes = await response.json();
 
-      // 2. Generate images on client and upload
-      for (let i = 0; i < qrCodes.length; i++) {
-        const qr = qrCodes[i];
-        const targetUrl = `${window.location.origin}/r/${qr.id}`;
-        
-        const tempQrInstance = new QRCodeStyling({
-          width: config.size,
-          height: config.size,
-          data: targetUrl,
-          image: config.logoSrc,
-          margin: 10,
-          qrOptions: { errorCorrectionLevel: config.level as any },
-          dotsOptions: { color: config.fgColor, type: config.dotsStyle },
-          backgroundOptions: { color: config.bgColor },
-          cornersSquareOptions: { type: config.cornersStyle, color: config.fgColor },
-          cornersDotOptions: { type: config.cornersStyle === 'dot' ? 'dot' : 'square', color: config.fgColor },
-          imageOptions: {
-            crossOrigin: "anonymous",
-            hideBackgroundDots: config.excavate,
-            imageSize: (config.logoSize || 80) / config.size,
-            margin: 5
-          }
-        });
-
-        const blob = await tempQrInstance.getRawData('png');
-        if (!blob) throw new Error('QR код үүсгэж чадсангүй');
-
-        const qrFileName = `${qr.id}.png`;
-        const { error: qrUploadError } = await supabase.storage
-          .from('qrcodes')
-          .upload(qrFileName, blob, {
-            contentType: 'image/png',
-            upsert: true
+      // 2. Generate images on client and upload in chunks
+      const processChunk = async (startIndex: number, chunkSize: number) => {
+        const endIndex = Math.min(startIndex + chunkSize, qrCodes.length);
+        for (let i = startIndex; i < endIndex; i++) {
+          const qr = qrCodes[i];
+          const targetUrl = `${window.location.origin}/r/${qr.id}`;
+          
+          const tempQrInstance = new QRCodeStyling({
+            width: config.size,
+            height: config.size,
+            data: targetUrl,
+            image: config.logoSrc,
+            margin: 10,
+            qrOptions: { errorCorrectionLevel: config.level as any },
+            dotsOptions: { color: config.fgColor, type: config.dotsStyle },
+            backgroundOptions: { color: config.bgColor },
+            cornersSquareOptions: { type: config.cornersStyle, color: config.fgColor },
+            cornersDotOptions: { type: config.cornersStyle === 'dot' ? 'dot' : 'square', color: config.fgColor },
+            imageOptions: {
+              crossOrigin: "anonymous",
+              hideBackgroundDots: config.excavate,
+              imageSize: (config.logoSize || 80) / config.size,
+              margin: 5
+            }
           });
 
-        if (qrUploadError) throw new Error('QR зураг хуулахад алдаа гарлаа: ' + qrUploadError.message);
+          const blob = await tempQrInstance.getRawData('png');
+          if (!blob) throw new Error('QR код үүсгэж чадсангүй');
 
-        const { data: { publicUrl } } = supabase.storage
-          .from('qrcodes')
-          .getPublicUrl(qrFileName);
+          const qrFileName = `${qr.id}.png`;
+          const { error: qrUploadError } = await supabase.storage
+            .from('qrcodes')
+            .upload(qrFileName, blob, {
+              contentType: 'image/png',
+              upsert: true
+            });
 
-        await fetch(`/api/qr-codes/${qr.id}`, {
-          method: 'PATCH',
-          headers: { 
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify({ 
-            qr_image_url: publicUrl,
-            target_url: targetUrl
-          })
-        });
+          if (qrUploadError) throw new Error('QR зураг хуулахад алдаа гарлаа: ' + qrUploadError.message);
 
-        setBulkProgress(Math.round(((i + 1) / qrCodes.length) * 100));
+          const { data: { publicUrl } } = supabase.storage
+            .from('qrcodes')
+            .getPublicUrl(qrFileName);
+
+          await fetch(`/api/qr-codes/${qr.id}`, {
+            method: 'PATCH',
+            headers: { 
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ 
+              qr_image_url: publicUrl,
+              target_url: targetUrl
+            })
+          });
+
+          setBulkProgress(Math.round(((i + 1) / qrCodes.length) * 100));
+        }
+      };
+
+      const CHUNK_SIZE = 5;
+      for (let i = 0; i < qrCodes.length; i += CHUNK_SIZE) {
+        await processChunk(i, CHUNK_SIZE);
+        // Yield to main thread
+        await new Promise(resolve => setTimeout(resolve, 50));
       }
 
       alert(`${items.length} ширхэг QR код амжилттай үүслээ!`);
@@ -492,6 +529,13 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
         targetUrl = publicUrl; // Temporary, will be replaced by redirect URL
       }
 
+      const finalConfig = {
+        ...config,
+        ...(usePassword && qrPassword ? { password: qrPassword } : {}),
+        ...(scanLimit ? { scanLimit: parseInt(scanLimit, 10) } : {}),
+        ...(useRouting && activeTab === 'url' ? { routingRules: { type: 'time', rules: routingRules } } : {})
+      };
+
       // 1. Insert into DB first to get the ID
       const response = await fetch('/api/qr-codes', {
         method: 'POST',
@@ -505,7 +549,7 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
           title,
           description,
           target_url: targetUrl,
-          config: usePassword && qrPassword ? { ...config, password: qrPassword } : config,
+          config: finalConfig,
           expires_at: expiresAt || null,
           type: activeTab,
           file_url: uploadedFileUrl || null,
@@ -718,6 +762,82 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
                     className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none text-sm"
                   />
                   <p className="text-xs text-slate-500 mt-1 ml-1">Энэхүү QR кодыг уншуулахад нууц үг шаардах болно.</p>
+                </div>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                <label className="block text-xs font-bold text-slate-500 mb-1 uppercase ml-1">Уншуулах хязгаар (Scan Limit)</label>
+                <input
+                  type="number"
+                  min="1"
+                  placeholder="Жишээ: 100"
+                  value={scanLimit}
+                  onChange={(e) => setScanLimit(e.target.value)}
+                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                />
+                <p className="text-xs text-slate-500 mt-1 ml-1">Хэдэн удаа уншуулсны дараа хаагдах вэ? (Хоосон бол хязгааргүй)</p>
+              </div>
+
+              {activeTab === 'url' && (
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                  <label className="flex items-center gap-2 cursor-pointer mb-3">
+                    <input 
+                      type="checkbox" 
+                      checked={useRouting}
+                      onChange={(e) => setUseRouting(e.target.checked)}
+                      className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500"
+                    />
+                    <span className="text-sm font-bold text-slate-700">Ухаалаг чиглүүлэлт (Цагаар)</span>
+                  </label>
+                  
+                  {useRouting && (
+                    <div className="mt-3 space-y-2">
+                      {routingRules.map((rule, idx) => (
+                        <div key={idx} className="flex gap-2 items-center">
+                          <input
+                            type="time"
+                            value={rule.startTime}
+                            onChange={(e) => {
+                              const newRules = [...routingRules];
+                              newRules[idx].startTime = e.target.value;
+                              setRoutingRules(newRules);
+                            }}
+                            className="w-24 px-2 py-1.5 rounded-lg border border-slate-200 text-sm"
+                          />
+                          <span>-</span>
+                          <input
+                            type="time"
+                            value={rule.endTime}
+                            onChange={(e) => {
+                              const newRules = [...routingRules];
+                              newRules[idx].endTime = e.target.value;
+                              setRoutingRules(newRules);
+                            }}
+                            className="w-24 px-2 py-1.5 rounded-lg border border-slate-200 text-sm"
+                          />
+                          <input
+                            type="url"
+                            placeholder="URL"
+                            value={rule.url}
+                            onChange={(e) => {
+                              const newRules = [...routingRules];
+                              newRules[idx].url = e.target.value;
+                              setRoutingRules(newRules);
+                            }}
+                            className="flex-1 px-2 py-1.5 rounded-lg border border-slate-200 text-sm"
+                          />
+                        </div>
+                      ))}
+                      <button
+                        onClick={() => setRoutingRules([...routingRules, { startTime: '00:00', endTime: '23:59', url: '' }])}
+                        className="text-xs text-blue-600 font-bold mt-2 hover:underline"
+                      >
+                        + Дүрэм нэмэх
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -1208,10 +1328,36 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
 
           {/* Design Stylings */}
           <section className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
-            <h2 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
-              <Layers size={20} className="text-blue-500" />
-              Дүрс загвар
-            </h2>
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                <Layers size={20} className="text-blue-500" />
+                Дүрс загвар
+              </h2>
+              <button
+                onClick={saveTemplate}
+                className="text-xs font-bold text-blue-600 bg-blue-50 px-3 py-1.5 rounded-lg hover:bg-blue-100 transition-colors"
+              >
+                + Загвар хадгалах
+              </button>
+            </div>
+
+            {savedTemplates.length > 0 && (
+              <div className="mb-6 p-4 bg-slate-50 rounded-xl border border-slate-100">
+                <label className="block text-xs font-bold text-slate-400 mb-3 uppercase tracking-wider">Миний загварууд</label>
+                <div className="flex gap-2 overflow-x-auto pb-2">
+                  {savedTemplates.map((template, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => loadTemplate(template)}
+                      className="flex-shrink-0 px-4 py-2 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-600 hover:border-blue-500 hover:text-blue-600 transition-colors"
+                    >
+                      Загвар {idx + 1}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="space-y-6">
               <div>
                 <label className="block text-xs font-bold text-slate-400 mb-3 uppercase tracking-wider">Цэгүүдийн хэлбэр</label>

@@ -47,7 +47,7 @@ setInterval(() => {
 }, CLEANUP_INTERVAL);
 
 // Increase payload limit for large QR logos
-app.use(express.json({ limit: '30mb' }));
+app.use(express.json({ limit: '10mb' }));
 
 // Custom JSON error handler for malformed JSON
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -151,6 +151,14 @@ const requireAdmin = async (req: express.Request, res: express.Response, next: e
 };
 
 // Health check endpoint
+apiRouter.get('/schema-check', async (req, res) => {
+  const admin = getSupabaseAdmin();
+  const { data, error } = await admin.rpc('get_tables'); // This might not exist
+  // Let's try to query information_schema if possible, but REST API doesn't allow it.
+  // Let's just return what we know.
+  res.json({ error });
+});
+
 apiRouter.get('/health', async (req, res) => {
   const admin = getSupabaseAdmin();
   let dbStatus = 'not_configured';
@@ -882,6 +890,10 @@ app.get('/r/:id', scanLimiter, async (req, res, next) => {
       return res.redirect('/qr-error?type=expired');
     }
 
+    if (qr.config?.scanLimit && qr.scan_count >= qr.config.scanLimit) {
+      return res.redirect('/qr-error?type=limit_reached');
+    }
+
     // Check for password protection
     if (qr.config && qr.config.password) {
       const cookieName = `qr_unlocked_${id}`;
@@ -1031,6 +1043,30 @@ app.get('/r/:id', scanLimiter, async (req, res, next) => {
     const logScan = async () => {
       try {
         await fetchLocation();
+        
+        // Update aggregated analytics in config
+        const { data: latestQR } = await admin.from('qr_codes').select('config').eq('id', id).single();
+        if (latestQR) {
+          const config = latestQR.config || {};
+          const analytics = config.analytics || { cities: {}, devices: {}, os: {}, browsers: {}, dates: {} };
+          
+          const city = scanLogData.city || 'Unknown';
+          const device = scanLogData.device_type || 'desktop';
+          const os = scanLogData.os_name || 'Unknown';
+          const browser = scanLogData.browser_name || 'Unknown';
+          const date = new Date().toISOString().split('T')[0];
+
+          analytics.cities[city] = (analytics.cities[city] || 0) + 1;
+          analytics.devices[device] = (analytics.devices[device] || 0) + 1;
+          analytics.os[os] = (analytics.os[os] || 0) + 1;
+          analytics.browsers[browser] = (analytics.browsers[browser] || 0) + 1;
+          analytics.dates[date] = (analytics.dates[date] || 0) + 1;
+
+          config.analytics = analytics;
+          
+          await admin.from('qr_codes').update({ config }).eq('id', id);
+        }
+
         const { error } = await admin.from('scan_logs').insert(scanLogData);
         if (error) {
           if (error.code === '42P01' || error.message.includes('relation "scan_logs" does not exist')) {
@@ -1067,12 +1103,14 @@ app.get('/r/:id', scanLimiter, async (req, res, next) => {
       const isAndroid = /android/i.test(userAgent || '');
       const appData = qr.bio_data as any;
       
+      const sanitizeUrl = (url: string) => url && /^javascript:/i.test(url) ? '#' : url;
+
       if (isIOS && appData.iosUrl) {
-        return res.redirect(appData.iosUrl);
+        return res.redirect(sanitizeUrl(appData.iosUrl));
       } else if (isAndroid && appData.androidUrl) {
-        return res.redirect(appData.androidUrl);
+        return res.redirect(sanitizeUrl(appData.androidUrl));
       } else if (appData.fallbackUrl) {
-        return res.redirect(appData.fallbackUrl);
+        return res.redirect(sanitizeUrl(appData.fallbackUrl));
       } else {
         return res.status(404).send('App URL not found for your device.');
       }
@@ -1105,7 +1143,29 @@ app.get('/r/:id', scanLimiter, async (req, res, next) => {
       }
     }
 
-    res.redirect(qr.target_url);
+    let targetUrl = qr.target_url;
+
+    // Smart Routing Logic (Time-based conditional redirect)
+    if (qr.config?.routingRules?.rules && qr.config.routingRules.rules.length > 0) {
+      const now = new Date();
+      // Use UTC+8 (Mongolia time) for time comparison
+      const mnTime = new Date(now.getTime() + 8 * 60 * 60 * 1000);
+      const currentHour = mnTime.getUTCHours().toString().padStart(2, '0');
+      const currentMinute = mnTime.getUTCMinutes().toString().padStart(2, '0');
+      const currentTimeStr = `${currentHour}:${currentMinute}`;
+
+      for (const rule of qr.config.routingRules.rules) {
+        if (currentTimeStr >= rule.startTime && currentTimeStr <= rule.endTime) {
+          targetUrl = rule.url;
+          break;
+        }
+      }
+    }
+
+    if (targetUrl && /^javascript:/i.test(targetUrl)) {
+      targetUrl = '#';
+    }
+    res.redirect(targetUrl);
   } catch (error) {
     console.error('Redirect error:', error);
     res.status(500).send('Internal server error');

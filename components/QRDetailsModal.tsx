@@ -84,13 +84,24 @@ export const QRDetailsModal: React.FC<QRDetailsModalProps> = ({ qr, onClose }) =
 
   const processData = () => {
     const counts: Record<string, number> = {};
-    analytics.forEach((log: any) => {
-      const date = new Date(log.scanned_at);
-      const key = viewMode === 'day' 
-        ? date.toISOString().split('T')[0]
-        : `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-      counts[key] = (counts[key] || 0) + 1;
-    });
+    if (analytics.length > 0) {
+      analytics.forEach((log: any) => {
+        const date = new Date(log.scanned_at);
+        const key = viewMode === 'day' 
+          ? date.toISOString().split('T')[0]
+          : `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+        counts[key] = (counts[key] || 0) + 1;
+      });
+    } else if (qr.config?.analytics?.dates) {
+      // Fallback to aggregated analytics
+      Object.entries(qr.config.analytics.dates).forEach(([dateStr, count]) => {
+        const date = new Date(dateStr);
+        const key = viewMode === 'day' 
+          ? dateStr
+          : `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+        counts[key] = (counts[key] || 0) + (count as number);
+      });
+    }
 
     // Fill in gaps
     const data = [];
@@ -125,6 +136,9 @@ export const QRDetailsModal: React.FC<QRDetailsModalProps> = ({ qr, onClose }) =
   const isExpired = qr.expires_at && new Date(qr.expires_at) < new Date();
 
   const getDeviceData = () => {
+    if (analytics.length === 0 && qr.config?.analytics?.devices) {
+      return Object.entries(qr.config.analytics.devices).map(([name, value]) => ({ name, value }));
+    }
     const counts: Record<string, number> = {};
     analytics.forEach((log: any) => {
       const type = log.device_type || 'desktop';
@@ -134,6 +148,9 @@ export const QRDetailsModal: React.FC<QRDetailsModalProps> = ({ qr, onClose }) =
   };
 
   const getOSData = () => {
+    if (analytics.length === 0 && qr.config?.analytics?.os) {
+      return Object.entries(qr.config.analytics.os).map(([name, value]) => ({ name, value }));
+    }
     const counts: Record<string, number> = {};
     analytics.forEach((log: any) => {
       const os = log.os_name || 'Unknown';
@@ -164,6 +181,40 @@ export const QRDetailsModal: React.FC<QRDetailsModalProps> = ({ qr, onClose }) =
     }
   };
 
+  const handleExportAnalytics = () => {
+    if (analytics.length === 0) {
+      alert('Экспортлох өгөгдөл олдсонгүй');
+      return;
+    }
+
+    // Convert analytics to CSV
+    const headers = ['Огноо', 'IP хаяг', 'Төхөөрөмж', 'Үйлдлийн систем', 'Хөтөч', 'Улс', 'Хот'];
+    const rows = analytics.map((log: any) => [
+      new Date(log.scanned_at).toLocaleString('mn-MN'),
+      log.ip_address || 'Тодорхойгүй',
+      log.device_type || 'Тодорхойгүй',
+      log.os_name || 'Тодорхойгүй',
+      log.browser_name || 'Тодорхойгүй',
+      log.country || 'Тодорхойгүй',
+      log.city || 'Тодорхойгүй'
+    ]);
+
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
+    ].join('\n');
+
+    const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `${qr.title || 'qr-analytics'}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
       <div className="bg-white w-full max-w-4xl max-h-[90vh] rounded-[40px] shadow-2xl overflow-hidden flex flex-col animate-in fade-in zoom-in duration-300">
@@ -178,12 +229,21 @@ export const QRDetailsModal: React.FC<QRDetailsModalProps> = ({ qr, onClose }) =
               <p className="text-xs text-slate-500 font-medium">QR кодын дэлгэрэнгүй мэдээлэл болон статистик</p>
             </div>
           </div>
-          <button 
-            onClick={onClose}
-            className="w-10 h-10 rounded-full bg-white border border-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-600 hover:border-slate-200 transition-all shadow-sm"
-          >
-            <X size={20} />
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleExportAnalytics}
+              className="px-4 py-2 bg-green-50 text-green-600 hover:bg-green-100 rounded-xl font-bold text-xs transition-colors flex items-center gap-2"
+            >
+              <Download size={16} />
+              Экспорт (CSV)
+            </button>
+            <button 
+              onClick={onClose}
+              className="w-10 h-10 rounded-full bg-white border border-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-600 hover:border-slate-200 transition-all shadow-sm"
+            >
+              <X size={20} />
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto p-8">
@@ -363,7 +423,7 @@ export const QRDetailsModal: React.FC<QRDetailsModalProps> = ({ qr, onClose }) =
                 </div>
 
                 {/* New Analytics Charts */}
-                {!loading && analytics.length > 0 && (
+                {!loading && (analytics.length > 0 || qr.config?.analytics) && (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-8">
                     <div className="bg-slate-50 rounded-3xl p-6 border border-slate-100">
                       <h4 className="text-sm font-bold text-slate-700 mb-4">Төхөөрөмж</h4>
@@ -426,7 +486,7 @@ export const QRDetailsModal: React.FC<QRDetailsModalProps> = ({ qr, onClose }) =
                   <div className="bg-slate-50 rounded-2xl border border-slate-100 overflow-hidden">
                     {analytics.length === 0 ? (
                       <div className="p-8 text-center text-slate-400 text-sm">
-                        Уншилт одоогоор алга.
+                        {qr.scan_count > 0 ? 'Нарийвчилсан мэдээлэл байхгүй байна.' : 'Уншилт одоогоор алга.'}
                       </div>
                     ) : (
                       <div className="max-h-[200px] overflow-y-auto">

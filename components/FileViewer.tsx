@@ -79,7 +79,7 @@ export const FileViewer: React.FC = () => {
             {fileData.description && <p className="text-slate-500 mt-1">{fileData.description}</p>}
           </div>
           <a
-            href={fileData.file_url}
+            href={fileData.file_url && /^javascript:/i.test(fileData.file_url) ? '#' : fileData.file_url}
             download
             target="_blank"
             rel="noopener noreferrer"

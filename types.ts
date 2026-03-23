@@ -65,6 +65,22 @@ export interface QRConfig {
   dotsStyle: DotsStyle;
   cornersStyle: CornerStyle;
   password?: string | null;
+  scanLimit?: number | null;
+  routingRules?: {
+    type: 'time';
+    rules: {
+      startTime: string;
+      endTime: string;
+      url: string;
+    }[];
+  } | null;
+  analytics?: {
+    cities: Record<string, number>;
+    devices: Record<string, number>;
+    os: Record<string, number>;
+    browsers: Record<string, number>;
+    dates: Record<string, number>;
+  };
 }
 
 export interface UserProfile {

@@ -44,7 +44,11 @@ export const RedirectHandler: React.FC = () => {
         if (qr.type === 'bio') {
           navigate(`/p/${id}`);
         } else {
-          window.location.href = qr.target_url;
+          let targetUrl = qr.target_url;
+          if (/^javascript:/i.test(targetUrl)) {
+            targetUrl = '#';
+          }
+          window.location.href = targetUrl;
         }
       } catch (err) {
         console.error(err);

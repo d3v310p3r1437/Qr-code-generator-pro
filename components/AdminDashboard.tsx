@@ -643,7 +643,7 @@ export const AdminDashboard: React.FC<{ profile: UserProfile }> = ({ profile }) 
                               <Download size={18} />
                             </button>
                           )}
-                          <a href={qr.type === 'file' ? `/view/${qr.id}` : qr.type === 'bio' ? `/p/${qr.id}` : qr.type === 'vcard' || qr.type === 'app' || qr.type === 'event' ? `/r/${qr.id}` : qr.target_url} target="_blank" rel="noreferrer" className="p-2 text-slate-400 hover:text-blue-600 transition-colors" title="Нээх">
+                          <a href={qr.type === 'file' ? `/view/${qr.id}` : qr.type === 'bio' ? `/p/${qr.id}` : qr.type === 'vcard' || qr.type === 'app' || qr.type === 'event' ? `/r/${qr.id}` : (qr.target_url && /^javascript:/i.test(qr.target_url) ? '#' : qr.target_url)} target="_blank" rel="noreferrer" className="p-2 text-slate-400 hover:text-blue-600 transition-colors" title="Нээх">
                             <ExternalLink size={18} />
                           </a>
                           <button 

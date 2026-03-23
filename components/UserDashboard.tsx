@@ -304,7 +304,7 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({ profile, onNewQR }
                       </button>
                     )}
                     <a 
-                      href={qr.type === 'file' ? `/view/${qr.id}` : qr.type === 'bio' ? `/p/${qr.id}` : qr.type === 'vcard' || qr.type === 'app' || qr.type === 'event' ? `/r/${qr.id}` : qr.target_url} 
+                      href={qr.type === 'file' ? `/view/${qr.id}` : qr.type === 'bio' ? `/p/${qr.id}` : qr.type === 'vcard' || qr.type === 'app' || qr.type === 'event' ? `/r/${qr.id}` : (qr.target_url && /^javascript:/i.test(qr.target_url) ? '#' : qr.target_url)} 
                       target="_blank" 
                       rel="noreferrer"
                       className="text-blue-600 hover:text-blue-700 transition-colors"
