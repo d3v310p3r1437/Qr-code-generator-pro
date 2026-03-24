@@ -1,5 +1,5 @@
 
-export type QRDataType = 'url' | 'text' | 'wifi' | 'file' | 'bio' | 'vcard' | 'app' | 'event' | 'vcard_bulk' | 'phone';
+export type QRDataType = 'url' | 'text' | 'wifi' | 'file' | 'bio' | 'vcard' | 'app' | 'event' | 'vcard_bulk' | 'phone' | 'mini_web_contact';
 
 export interface VCardData {
   firstName: string;
@@ -38,8 +38,18 @@ export interface BioLink {
 export interface BioData {
   profile_image_url?: string;
   name: string;
+  firstName?: string;
+  lastName?: string;
   position?: string;
   company?: string;
+  organization?: string;
+  department?: string;
+  title?: string;
+  phone?: string;
+  personalPhone?: string;
+  email?: string;
+  website?: string;
+  address?: string;
   bio: string;
   links: BioLink[];
   theme_color: string;

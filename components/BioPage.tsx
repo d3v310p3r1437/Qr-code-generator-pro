@@ -20,7 +20,9 @@ import {
   AlertCircle,
   QrCode,
   Briefcase,
-  Building2
+  Building2,
+  UserPlus,
+  Layout
 } from 'lucide-react';
 
 const ICON_MAP: Record<string, any> = {
@@ -33,6 +35,38 @@ const ICON_MAP: Record<string, any> = {
   mail: Mail,
   phone: Phone,
   youtube: Youtube,
+};
+
+const ContactLink = ({ href, icon, label, value, bio_data }: { href: string, icon: string, label: string, value: string, bio_data: any }) => {
+  const Icon = ICON_MAP[icon] || Globe;
+  return (
+    <motion.a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      whileHover={{ scale: 1.02, y: -2 }}
+      whileTap={{ scale: 0.98 }}
+      className="w-full flex items-center justify-between p-4 rounded-2xl shadow-sm border border-slate-100 transition-all group"
+      style={{ 
+        backgroundColor: bio_data.button_color || '#ffffff',
+        color: bio_data.button_text_color || '#0f172a'
+      }}
+    >
+      <div className="flex items-center gap-4">
+        <div 
+          className="w-10 h-10 rounded-xl flex items-center justify-center bg-slate-50 group-hover:bg-blue-50 transition-colors"
+          style={{ color: bio_data.theme_color || '#3b82f6' }}
+        >
+          <Icon size={20} />
+        </div>
+        <div className="text-left">
+          <div className="text-[10px] font-bold uppercase tracking-wider opacity-50">{DOMPurify.sanitize(label, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] })}</div>
+          <div className="text-sm font-bold">{DOMPurify.sanitize(value, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] })}</div>
+        </div>
+      </div>
+      <ExternalLink size={16} className="opacity-20 group-hover:opacity-100 transition-opacity" />
+    </motion.a>
+  );
 };
 
 export const BioPage: React.FC = () => {
@@ -70,7 +104,8 @@ export const BioPage: React.FC = () => {
         if (!response.ok) throw new Error('Хуудас олдсонгүй');
         const data = await response.json();
         
-        if (data.type !== 'bio' || !data.bio_data) throw new Error('Энэ QR код мини-вэб биш байна');
+        if (data.type !== 'bio' && data.type !== 'mini_web_contact') throw new Error('Энэ QR код мини-вэб биш байна');
+        if (!data.bio_data) throw new Error('Өгөгдөл олдсонгүй');
 
         setQr(data);
         
@@ -119,6 +154,36 @@ export const BioPage: React.FC = () => {
 
   const { bio_data } = qr;
 
+  const downloadVCard = () => {
+    if (qr.type !== 'mini_web_contact') return;
+    
+    const v = qr.bio_data;
+    const vcard = [
+      'BEGIN:VCARD',
+      'VERSION:3.0',
+      `FN:${v.name}`,
+      `N:;${v.name};;;`,
+      v.company ? `ORG:${v.company}${v.department ? ';' + v.department : ''}` : '',
+      v.position ? `TITLE:${v.position}` : '',
+      v.phone ? `TEL;TYPE=WORK,VOICE:${v.phone}` : '',
+      v.personalPhone ? `TEL;TYPE=CELL,VOICE:${v.personalPhone}` : '',
+      v.email ? `EMAIL;TYPE=PREF,INTERNET:${v.email}` : '',
+      v.website ? `URL:${v.website}` : '',
+      v.address ? `ADR;TYPE=WORK:;;${v.address};;;;` : '',
+      'END:VCARD'
+    ].filter(Boolean).join('\n');
+
+    const blob = new Blob([vcard], { type: 'text/vcard' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `${v.name.replace(/\s/g, '_')}.vcf`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+  };
+
   return (
     <div 
       className="min-h-screen w-full flex flex-col items-center py-12 px-6"
@@ -160,36 +225,107 @@ export const BioPage: React.FC = () => {
             {DOMPurify.sanitize(bio_data.name, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] })}
           </h1>
 
-          {(bio_data.position || bio_data.company) && (
+          {(bio_data.position || bio_data.company || bio_data.department) && (
             <div 
               className="flex flex-wrap justify-center items-center gap-x-4 gap-y-1 mb-4 text-sm font-medium opacity-70"
               style={{ color: bio_data.text_color || '#475569' }}
             >
               {bio_data.position && (
-                <div className="flex items-center gap-1.5">
-                  <Briefcase size={14} />
-                  <span>{DOMPurify.sanitize(bio_data.position, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] })}</span>
+                <div className="flex items-center gap-1.5 max-w-[280px]">
+                  <Briefcase size={14} className="flex-shrink-0" />
+                  <span className="text-center">{DOMPurify.sanitize(bio_data.position, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] })}</span>
                 </div>
               )}
               {bio_data.company && (
-                <div className="flex items-center gap-1.5">
-                  <Building2 size={14} />
-                  <span>{DOMPurify.sanitize(bio_data.company, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] })}</span>
+                <div className="flex items-center gap-1.5 max-w-[280px]">
+                  <Building2 size={14} className="flex-shrink-0" />
+                  <span className="text-center">
+                    {DOMPurify.sanitize(bio_data.company, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] })}
+                  </span>
+                </div>
+              )}
+              {bio_data.department && (
+                <div className="flex items-center gap-1.5 max-w-[280px]">
+                  <Layout size={14} className="flex-shrink-0" />
+                  <span className="text-center">
+                    {DOMPurify.sanitize(bio_data.department, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] })}
+                  </span>
                 </div>
               )}
             </div>
           )}
 
           <p 
-            className="text-sm opacity-80 leading-relaxed max-w-xs mx-auto"
+            className="text-sm opacity-80 leading-relaxed max-w-sm mx-auto px-4"
             style={{ color: bio_data.text_color || '#475569' }}
           >
             {DOMPurify.sanitize(bio_data.bio, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] })}
           </p>
+
+          {qr.type === 'mini_web_contact' && (
+            <motion.button
+              initial={{ y: 20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              transition={{ delay: 0.25 }}
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={downloadVCard}
+              className="mt-6 flex items-center gap-2 px-6 py-3 rounded-2xl font-bold shadow-lg transition-all mx-auto"
+              style={{ 
+                backgroundColor: bio_data.button_color || '#3b82f6',
+                color: bio_data.button_text_color || '#ffffff'
+              }}
+            >
+              <UserPlus size={20} />
+              Холбоо барих мэдээлэл хадгалах
+            </motion.button>
+          )}
         </motion.div>
 
         {/* Links */}
         <div className="w-full space-y-4">
+          {/* Direct Contact Links for Mini-Web + Contact */}
+          {qr.type === 'mini_web_contact' && (
+            <>
+              {bio_data.personalPhone && (
+                <ContactLink 
+                  href={`tel:${bio_data.personalPhone.replace(/\s/g, '')}`} 
+                  icon="phone" 
+                  label="Хувийн утас" 
+                  value={bio_data.personalPhone} 
+                  bio_data={bio_data}
+                />
+              )}
+              {bio_data.email && (
+                <ContactLink 
+                  href={`mailto:${bio_data.email}`} 
+                  icon="mail" 
+                  label="Имэйл" 
+                  value={bio_data.email} 
+                  bio_data={bio_data}
+                />
+              )}
+              {bio_data.website && (
+                <ContactLink 
+                  href={/^https?:\/\//i.test(bio_data.website) ? bio_data.website : `https://${bio_data.website}`} 
+                  icon="globe" 
+                  label="Вэб сайт" 
+                  value={bio_data.website} 
+                  bio_data={bio_data}
+                />
+              )}
+              {bio_data.address && (
+                <ContactLink 
+                  href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(bio_data.address)}`} 
+                  icon="globe" 
+                  label="Хаяг" 
+                  value={bio_data.address} 
+                  bio_data={bio_data}
+                />
+              )}
+            </>
+          )}
+
           {bio_data.links.map((link: any, index: number) => {
             const Icon = ICON_MAP[link.icon || 'globe'] || Globe;
             

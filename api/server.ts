@@ -391,7 +391,7 @@ apiRouter.post('/qr-codes/bulk', requireAuth, async (req, res) => {
       }
     }
 
-    const { items, config, client_generation } = req.body;
+    const { items, config, client_generation, type = 'vcard' } = req.body;
     if (!items || !Array.isArray(items)) {
       return res.status(400).json({ error: 'Invalid items array' });
     }
@@ -404,6 +404,11 @@ apiRouter.post('/qr-codes/bulk', requireAuth, async (req, res) => {
     }
 
     if (profile && profile.role !== 'admin') {
+      if (profile.allowed_qr_types && profile.allowed_qr_types.length > 0) {
+        if (!profile.allowed_qr_types.includes(type)) {
+          return res.status(403).json({ error: `You are not allowed to create '${type}' type of QR code.` });
+        }
+      }
       const { count } = await admin.from('qr_codes').select('*', { count: 'exact', head: true }).eq('user_id', user.id);
       const currentCount = count || 0;
       if (currentCount + items.length > profile.qr_limit) {
@@ -417,8 +422,8 @@ apiRouter.post('/qr-codes/bulk', requireAuth, async (req, res) => {
       // Insert DB record first to get ID
       const qrRecord = {
         user_id: user.id,
-        title: `${item.firstName || ''} ${item.lastName || ''}`.trim() || 'vCard',
-        type: 'vcard',
+        title: `${item.firstName || ''} ${item.lastName || ''}`.trim() || (type === 'mini_web_contact' ? 'Mini-Web' : 'vCard'),
+        type: type,
         target_url: '',
         bio_data: item,
         config: processedConfig
@@ -1094,7 +1099,7 @@ app.get('/r/:id', scanLimiter, async (req, res, next) => {
       return res.redirect(`/view/${id}`);
     }
 
-    if (qr.type === 'bio') {
+    if (qr.type === 'bio' || qr.type === 'mini_web_contact') {
       return res.redirect(`/p/${id}`);
     }
 

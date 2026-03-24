@@ -41,7 +41,7 @@ export const RedirectHandler: React.FC = () => {
           .eq('id', id);
 
         // Redirect
-        if (qr.type === 'bio') {
+        if (qr.type === 'bio' || qr.type === 'mini_web_contact') {
           navigate(`/p/${id}`);
         } else {
           let targetUrl = qr.target_url;

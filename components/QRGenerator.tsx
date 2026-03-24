@@ -43,7 +43,9 @@ import {
   Building2,
   X,
   QrCode,
-  Users
+  Users,
+  UserPlus,
+  MapPin
 } from 'lucide-react';
 import { generateSlogan } from '../services/geminiService';
 import { QRConfig, QRDataType, DotsStyle, CornerStyle, UserProfile, BioData, BioLink } from '../types';
@@ -104,8 +106,18 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
   const [file, setFile] = useState<File | null>(null);
   const [bioData, setBioData] = useState<BioData>({
     name: '',
+    firstName: '',
+    lastName: '',
     position: '',
     company: '',
+    organization: '',
+    department: '',
+    title: '',
+    phone: '',
+    personalPhone: '',
+    email: '',
+    website: '',
+    address: '',
     bio: '',
     links: [],
     theme_color: '#3b82f6',
@@ -279,7 +291,7 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
     if (activeTab === 'phone') return phone ? `tel:${phone}` : '';
     if (activeTab === 'wifi') return `WIFI:S:${wifi.ssid};T:${wifi.encryption};P:${wifi.password};;`;
     if (activeTab === 'file') return `${window.location.origin}/view/preview`;
-    if (activeTab === 'bio') return `${window.location.origin}/p/preview`;
+    if (activeTab === 'bio' || activeTab === 'mini_web_contact') return `${window.location.origin}/p/preview`;
     if (activeTab === 'app') return `${window.location.origin}/r/preview`;
     if (activeTab === 'vcard') return `${window.location.origin}/r/preview`;
     if (activeTab === 'event') return `${window.location.origin}/r/preview`;
@@ -330,7 +342,7 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
     if (activeTab === 'url') setUrl(normalizedUrlValue);
     setConfig(prev => ({ ...prev, value }));
     
-    if (activeTab === 'bio') {
+    if (activeTab === 'bio' || activeTab === 'mini_web_contact') {
       setShowBioPreview(true);
     }
   };
@@ -368,7 +380,8 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
         body: JSON.stringify({
           items,
           config,
-          client_generation: true
+          client_generation: true,
+          type: activeTab === 'vcard_bulk' ? 'vcard' : activeTab
         })
       });
 
@@ -528,7 +541,7 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
       let bioProfileUrl = '';
 
       // Handle Bio Profile Image
-      if (activeTab === 'bio' && bioImage) {
+      if ((activeTab === 'bio' || activeTab === 'mini_web_contact') && bioImage) {
         const fileExt = bioImage.name.split('.').pop();
         const fileName = `bio_${Math.random().toString(36).substring(2, 15)}_${Date.now()}.${fileExt}`;
         const { error: uploadError } = await supabase.storage
@@ -588,7 +601,10 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
           type: activeTab,
           file_url: uploadedFileUrl || null,
           file_type: uploadedFileType || null,
-          bio_data: activeTab === 'bio' ? { ...bioData, profile_image_url: bioProfileUrl || bioData.profile_image_url } : 
+          bio_data: activeTab === 'bio' || activeTab === 'mini_web_contact' ? { 
+                      ...bioData, 
+                      profile_image_url: bioProfileUrl || bioData.profile_image_url
+                    } : 
                     activeTab === 'vcard' ? vcardData :
                     activeTab === 'app' ? appData :
                     activeTab === 'event' ? eventData : null
@@ -611,8 +627,8 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
 
       // 2. Generate the QR code image blob
       // Use redirect URL for 'url', 'file', 'bio', and 'app' types
-      const qrValue = (activeTab === 'url' || activeTab === 'file' || activeTab === 'bio' || activeTab === 'app' || activeTab === 'vcard' || activeTab === 'event') 
-        ? `${window.location.origin}${activeTab === 'bio' ? '/p/' : '/r/'}${qrData.id}` 
+      const qrValue = (activeTab === 'url' || activeTab === 'file' || activeTab === 'bio' || activeTab === 'mini_web_contact' || activeTab === 'app' || activeTab === 'vcard' || activeTab === 'event') 
+        ? `${window.location.origin}/r/${qrData.id}` 
         : targetUrl;
       
       // Update the QR instance with the correct value before generating the blob
@@ -644,7 +660,7 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
 
         // 5. Update DB with image URL and correct target_url for bio/file/app/vcard/event
         const updateData: any = { qr_image_url: publicUrl };
-        if (activeTab === 'bio' || activeTab === 'file' || activeTab === 'app' || activeTab === 'vcard' || activeTab === 'event') {
+        if (activeTab === 'bio' || activeTab === 'mini_web_contact' || activeTab === 'file' || activeTab === 'app' || activeTab === 'vcard' || activeTab === 'event') {
           updateData.target_url = qrValue;
         }
 
@@ -888,6 +904,7 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
               { id: 'wifi', icon: Wifi, label: 'Wi-Fi' },
               { id: 'file', icon: Upload, label: 'Файл/Зураг' },
               { id: 'bio', icon: Layout, label: 'Mini-Web' },
+              { id: 'mini_web_contact', icon: UserPlus, label: 'Mini-Web + Contact' },
               { id: 'vcard', icon: User, label: 'Нэрийн хуудас' },
               { id: 'app', icon: Monitor, label: 'App Store' },
               { id: 'event', icon: Calendar, label: 'Арга хэмжээ' },
@@ -1011,7 +1028,7 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
               </div>
             )}
             
-            {activeTab === 'bio' && (
+            {(activeTab === 'bio' || activeTab === 'mini_web_contact') && (
               <div className="space-y-6">
                 <div className="flex flex-col md:flex-row gap-6">
                   <div 
@@ -1073,6 +1090,18 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
                         />
                       </div>
                     </div>
+                    {activeTab === 'mini_web_contact' && (
+                      <div>
+                        <label className="block text-xs font-bold text-slate-500 mb-1 uppercase ml-1">Хэлтэс</label>
+                        <input
+                          type="text"
+                          value={bioData.department}
+                          onChange={(e) => setBioData({ ...bioData, department: e.target.value })}
+                          className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                          placeholder="Жишээ: Маркетингийн хэлтэс"
+                        />
+                      </div>
+                    )}
                     <div>
                       <label className="block text-xs font-bold text-slate-500 mb-1 uppercase ml-1">Намтар</label>
                       <textarea
@@ -1085,6 +1114,57 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
                     </div>
                   </div>
                 </div>
+
+                {activeTab === 'mini_web_contact' && (
+                  <div className="space-y-4 pt-4 border-t border-slate-100">
+                    <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                      <Phone size={18} className="text-blue-500" />
+                      Холбоо барих мэдээлэл
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-500 mb-1 uppercase ml-1">Хувийн утас</label>
+                        <input
+                          type="tel"
+                          value={bioData.personalPhone}
+                          onChange={(e) => setBioData({ ...bioData, personalPhone: e.target.value })}
+                          className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                          placeholder="99112233"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-500 mb-1 uppercase ml-1">Имэйл</label>
+                        <input
+                          type="email"
+                          value={bioData.email}
+                          onChange={(e) => setBioData({ ...bioData, email: e.target.value })}
+                          className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                          placeholder="name@example.com"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-500 mb-1 uppercase ml-1">Вэб сайт</label>
+                        <input
+                          type="url"
+                          value={bioData.website}
+                          onChange={(e) => setBioData({ ...bioData, website: e.target.value })}
+                          className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                          placeholder="www.example.com"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-500 mb-1 uppercase ml-1">Хаяг</label>
+                        <input
+                          type="text"
+                          value={bioData.address}
+                          onChange={(e) => setBioData({ ...bioData, address: e.target.value })}
+                          className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                          placeholder="Улаанбаатар, Сүхбаатар дүүрэг..."
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
@@ -1652,36 +1732,132 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
                     {bioData.name || 'Таны нэр'}
                   </h1>
 
-                  {(bioData.position || bioData.company) && (
+                  {(bioData.position || bioData.company || bioData.department) && (
                     <div 
                       className="flex flex-wrap justify-center items-center gap-x-3 gap-y-1 mb-3 text-xs font-medium opacity-70"
                       style={{ color: bioData.text_color || '#475569' }}
                     >
                       {bioData.position && (
-                        <div className="flex items-center gap-1">
-                          <Briefcase size={12} />
-                          <span>{bioData.position}</span>
+                        <div className="flex items-center gap-1.5 max-w-[280px]">
+                          <Briefcase size={12} className="flex-shrink-0" />
+                          <span className="text-center">{bioData.position}</span>
                         </div>
                       )}
                       {bioData.company && (
-                        <div className="flex items-center gap-1">
-                          <Building2 size={12} />
-                          <span>{bioData.company}</span>
+                        <div className="flex items-center gap-1.5 max-w-[280px]">
+                          <Building2 size={12} className="flex-shrink-0" />
+                          <span className="text-center">{bioData.company}</span>
+                        </div>
+                      )}
+                      {bioData.department && (
+                        <div className="flex items-center gap-1.5 max-w-[280px]">
+                          <Layout size={12} className="flex-shrink-0" />
+                          <span className="text-center">{bioData.department}</span>
                         </div>
                       )}
                     </div>
                   )}
 
                   <p 
-                    className="text-xs opacity-80 leading-relaxed max-w-[240px] mx-auto"
+                    className="text-xs opacity-80 leading-relaxed max-w-[360px] mx-auto px-4"
                     style={{ color: bioData.text_color || '#475569' }}
                   >
                     {bioData.bio || 'Таны намтар энд харагдана...'}
                   </p>
                 </div>
 
+                {/* Save Contact Button */}
+                {activeTab === 'mini_web_contact' && (
+                  <div className="w-full mb-8">
+                    <button
+                      className="w-full py-3.5 rounded-2xl font-bold shadow-lg transition-all flex items-center justify-center gap-3"
+                      style={{ 
+                        backgroundColor: bioData.theme_color || '#3b82f6',
+                        color: '#ffffff'
+                      }}
+                    >
+                      <UserPlus size={18} /> Холбоо барих хадгалах
+                    </button>
+                  </div>
+                )}
+
+                {/* Contact Information */}
+                {activeTab === 'mini_web_contact' && (
+                  <div className="w-full space-y-3 mb-8">
+                    {bioData.personalPhone && (
+                      <div
+                        className="flex items-center p-3 rounded-xl shadow-sm border border-white/10"
+                        style={{ 
+                          backgroundColor: bioData.button_color || '#ffffff',
+                          color: bioData.button_text_color || '#0f172a'
+                        }}
+                      >
+                        <div className="p-1.5 rounded-lg bg-black/5 mr-3">
+                          <Phone size={16} />
+                        </div>
+                        <div className="flex-1 flex flex-col">
+                          <span className="font-bold text-[10px] opacity-50 uppercase">Утас</span>
+                          <span className="font-bold text-xs">{bioData.personalPhone}</span>
+                        </div>
+                      </div>
+                    )}
+                    {bioData.email && (
+                      <div
+                        className="flex items-center p-3 rounded-xl shadow-sm border border-white/10"
+                        style={{ 
+                          backgroundColor: bioData.button_color || '#ffffff',
+                          color: bioData.button_text_color || '#0f172a'
+                        }}
+                      >
+                        <div className="p-1.5 rounded-lg bg-black/5 mr-3">
+                          <Mail size={16} />
+                        </div>
+                        <div className="flex-1 flex flex-col">
+                          <span className="font-bold text-[10px] opacity-50 uppercase">Цахим шуудан</span>
+                          <span className="font-bold text-xs">{bioData.email}</span>
+                        </div>
+                      </div>
+                    )}
+                    {bioData.website && (
+                      <div
+                        className="flex items-center p-3 rounded-xl shadow-sm border border-white/10"
+                        style={{ 
+                          backgroundColor: bioData.button_color || '#ffffff',
+                          color: bioData.button_text_color || '#0f172a'
+                        }}
+                      >
+                        <div className="p-1.5 rounded-lg bg-black/5 mr-3">
+                          <Globe size={16} />
+                        </div>
+                        <div className="flex-1 flex flex-col">
+                          <span className="font-bold text-[10px] opacity-50 uppercase">Вэб сайт</span>
+                          <span className="font-bold text-xs">{bioData.website}</span>
+                        </div>
+                      </div>
+                    )}
+                    {bioData.address && (
+                      <div
+                        className="flex items-center p-3 rounded-xl shadow-sm border border-white/10"
+                        style={{ 
+                          backgroundColor: bioData.button_color || '#ffffff',
+                          color: bioData.button_text_color || '#0f172a'
+                        }}
+                      >
+                        <div className="p-1.5 rounded-lg bg-black/5 mr-3">
+                          <MapPin size={16} />
+                        </div>
+                        <div className="flex-1 flex flex-col">
+                          <span className="font-bold text-[10px] opacity-50 uppercase">Хаяг</span>
+                          <span className="font-bold text-xs">{bioData.address}</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Links */}
                 <div className="w-full space-y-3">
+                  <h4 className="text-[10px] font-bold uppercase opacity-40 mb-2 ml-1" style={{ color: bioData.text_color || '#0f172a' }}>Сошиал холбоосууд</h4>
                   {bioData.links.length > 0 ? bioData.links.map((link) => {
                     // Simple icon mapping for preview
                     const Icon = link.icon === 'mail' ? Mail : 

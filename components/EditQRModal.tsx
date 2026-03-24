@@ -99,7 +99,7 @@ export const EditQRModal: React.FC<EditQRModalProps> = ({ qr, onClose, onSaved }
         finalTargetUrl = `tel:${phone}`;
       } else if (qr.type === 'wifi') {
         finalTargetUrl = `WIFI:T:${wifi.encryption};S:${wifi.ssid};P:${wifi.password};;`;
-      } else if (qr.type === 'bio' && bioImage) {
+      } else if ((qr.type === 'bio' || qr.type === 'mini_web_contact') && bioImage) {
         const fileExt = bioImage.name.split('.').pop();
         const fileName = `bio_${Math.random().toString(36).substring(2, 15)}_${Date.now()}.${fileExt}`;
         const { error: uploadError } = await supabase.storage
@@ -139,7 +139,7 @@ export const EditQRModal: React.FC<EditQRModalProps> = ({ qr, onClose, onSaved }
         file_url: updatedFileUrl,
         file_type: updatedFileType,
         expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
-        bio_data: qr.type === 'bio' ? { ...bioData, profile_image_url: bioProfileUrl } : 
+        bio_data: (qr.type === 'bio' || qr.type === 'mini_web_contact') ? { ...bioData, profile_image_url: bioProfileUrl } : 
                   qr.type === 'vcard' ? vcardData :
                   qr.type === 'app' ? appData :
                   qr.type === 'event' ? eventData : null
@@ -314,7 +314,7 @@ export const EditQRModal: React.FC<EditQRModalProps> = ({ qr, onClose, onSaved }
             </div>
           )}
 
-          {qr.type === 'bio' && (
+          {(qr.type === 'bio' || qr.type === 'mini_web_contact') && (
             <div className="space-y-6">
               <div className="flex flex-col md:flex-row gap-6">
                 <div 
@@ -376,6 +376,18 @@ export const EditQRModal: React.FC<EditQRModalProps> = ({ qr, onClose, onSaved }
                       />
                     </div>
                   </div>
+                  {qr.type === 'mini_web_contact' && (
+                    <div>
+                      <label className="block text-xs font-bold text-slate-500 mb-1 uppercase ml-1">Хэлтэс</label>
+                      <input
+                        type="text"
+                        value={bioData.department || ''}
+                        onChange={(e) => setBioData({ ...bioData, department: e.target.value })}
+                        className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                        placeholder="Жишээ: Маркетингийн хэлтэс"
+                      />
+                    </div>
+                  )}
                   <div>
                     <label className="block text-xs font-bold text-slate-500 mb-1 uppercase ml-1">Намтар</label>
                     <textarea
@@ -388,6 +400,56 @@ export const EditQRModal: React.FC<EditQRModalProps> = ({ qr, onClose, onSaved }
                   </div>
                 </div>
               </div>
+
+              {qr.type === 'mini_web_contact' && (
+                <div className="space-y-4 pt-4 border-t border-slate-100">
+                  <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                    Холбоо барих мэдээлэл
+                  </h3>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-500 mb-1 uppercase ml-1">Хувийн утас</label>
+                      <input
+                        type="tel"
+                        value={bioData.personalPhone || ''}
+                        onChange={(e) => setBioData({ ...bioData, personalPhone: e.target.value })}
+                        className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                        placeholder="99112233"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-500 mb-1 uppercase ml-1">Имэйл</label>
+                      <input
+                        type="email"
+                        value={bioData.email || ''}
+                        onChange={(e) => setBioData({ ...bioData, email: e.target.value })}
+                        className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                        placeholder="name@example.com"
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="block text-xs font-bold text-slate-500 mb-1 uppercase ml-1">Вэб сайт</label>
+                      <input
+                        type="url"
+                        value={bioData.website || ''}
+                        onChange={(e) => setBioData({ ...bioData, website: e.target.value })}
+                        className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                        placeholder="https://example.com"
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="block text-xs font-bold text-slate-500 mb-1 uppercase ml-1">Хаяг</label>
+                      <input
+                        type="text"
+                        value={bioData.address || ''}
+                        onChange={(e) => setBioData({ ...bioData, address: e.target.value })}
+                        className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                        placeholder="Улаанбаатар, Сүхбаатар дүүрэг..."
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div className="space-y-4">
                 <div className="flex items-center justify-between">

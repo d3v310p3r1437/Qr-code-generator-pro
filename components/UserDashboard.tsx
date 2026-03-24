@@ -279,8 +279,8 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({ profile, onNewQR }
                   </div>
                 </div>
                 <div className="bg-slate-50 p-4 flex items-center justify-between gap-2" onClick={(e) => e.stopPropagation()}>
-                  <div className="flex items-center gap-2 text-[10px] font-bold text-slate-400 uppercase truncate max-w-[150px]" title={qr.type === 'file' ? 'Файл' : qr.type === 'vcard' ? 'Нэрийн хуудас' : qr.type === 'app' ? 'Апп татах' : qr.type === 'event' ? 'Арга хэмжээ' : qr.target_url}>
-                    <QrCode size={12} /> {qr.type === 'file' ? 'Файл' : qr.type === 'vcard' ? 'Нэрийн хуудас' : qr.type === 'app' ? 'Апп татах' : qr.type === 'event' ? 'Арга хэмжээ' : qr.target_url}
+                  <div className="flex items-center gap-2 text-[10px] font-bold text-slate-400 uppercase truncate max-w-[150px]" title={qr.type === 'file' ? 'Файл' : qr.type === 'vcard' ? 'Нэрийн хуудас' : qr.type === 'mini_web_contact' ? 'Mini-Web + Contact' : qr.type === 'app' ? 'Апп татах' : qr.type === 'event' ? 'Арга хэмжээ' : qr.target_url}>
+                    <QrCode size={12} /> {qr.type === 'file' ? 'Файл' : qr.type === 'vcard' ? 'Нэрийн хуудас' : qr.type === 'mini_web_contact' ? 'Mini-Web + Contact' : qr.type === 'app' ? 'Апп татах' : qr.type === 'event' ? 'Арга хэмжээ' : qr.target_url}
                   </div>
                   <div className="flex items-center gap-3 shrink-0">
                     <button 
@@ -304,7 +304,7 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({ profile, onNewQR }
                       </button>
                     )}
                     <a 
-                      href={qr.type === 'file' ? `/view/${qr.id}` : qr.type === 'bio' ? `/p/${qr.id}` : qr.type === 'vcard' || qr.type === 'app' || qr.type === 'event' ? `/r/${qr.id}` : (qr.target_url && /^javascript:/i.test(qr.target_url) ? '#' : qr.target_url)} 
+                      href={qr.type === 'file' ? `/view/${qr.id}` : (qr.type === 'bio' || qr.type === 'mini_web_contact') ? `/p/${qr.id}` : qr.type === 'vcard' || qr.type === 'app' || qr.type === 'event' ? `/r/${qr.id}` : (qr.target_url && /^javascript:/i.test(qr.target_url) ? '#' : qr.target_url)} 
                       target="_blank" 
                       rel="noreferrer"
                       className="text-blue-600 hover:text-blue-700 transition-colors"
