@@ -51,6 +51,7 @@ export interface BioData {
 
 export type DotsStyle = 'square' | 'dots' | 'rounded' | 'extra-rounded' | 'classy' | 'classy-rounded';
 export type CornerStyle = 'square' | 'dot' | 'extra-rounded';
+export type FrameStyle = 'none' | 'bottom-text' | 'top-text' | 'badge' | 'minimal' | 'modern' | 'classic';
 
 export interface QRConfig {
   value: string;
@@ -81,6 +82,10 @@ export interface QRConfig {
     browsers: Record<string, number>;
     dates: Record<string, number>;
   };
+  frameStyle?: FrameStyle;
+  frameText?: string;
+  frameColor?: string;
+  frameTextColor?: string;
 }
 
 export interface UserProfile {

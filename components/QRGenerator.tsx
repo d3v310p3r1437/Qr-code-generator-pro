@@ -210,6 +210,7 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
   };
 
   const qrRef = useRef<HTMLDivElement>(null);
+  const bulkQrRef = useRef<HTMLDivElement>(null);
   const qrCodeInstance = useRef<QRCodeStyling | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const logoInputRef = useRef<HTMLInputElement>(null);
@@ -376,7 +377,13 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
         throw new Error(result.error || 'Бөөнөөр үүсгэхэд алдаа гарлаа');
       }
 
-      const qrCodes = await response.json();
+      const result = await response.json();
+      console.log('Bulk records created:', result);
+      const qrCodes = result.data;
+
+      if (!qrCodes || !Array.isArray(qrCodes)) {
+        throw new Error('Серверээс ирсэн өгөгдөл буруу байна');
+      }
 
       // 2. Generate images on client and upload in chunks
       const processChunk = async (startIndex: number, chunkSize: number) => {
@@ -384,6 +391,8 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
         for (let i = startIndex; i < endIndex; i++) {
           const qr = qrCodes[i];
           const targetUrl = `${window.location.origin}/r/${qr.id}`;
+          
+          console.log(`Generating QR for ${qr.id} (${i + 1}/${qrCodes.length})`);
           
           const tempQrInstance = new QRCodeStyling({
             width: config.size,
@@ -404,10 +413,24 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
             }
           });
 
+          // Attach to hidden div to ensure rendering in some browsers
+          if (bulkQrRef.current) {
+            bulkQrRef.current.innerHTML = '';
+            tempQrInstance.append(bulkQrRef.current);
+          }
+
+          // Small delay to ensure canvas is ready
+          await new Promise(resolve => setTimeout(resolve, 100));
+
           const blob = await tempQrInstance.getRawData('png');
-          if (!blob) throw new Error('QR код үүсгэж чадсангүй');
+          if (!blob) {
+            console.error(`Failed to generate blob for QR ${qr.id}`);
+            throw new Error('QR код үүсгэж чадсангүй');
+          }
 
           const qrFileName = `${qr.id}.png`;
+          console.log(`Uploading ${qrFileName} to storage...`);
+          
           const { error: qrUploadError } = await supabase.storage
             .from('qrcodes')
             .upload(qrFileName, blob, {
@@ -415,13 +438,18 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
               upsert: true
             });
 
-          if (qrUploadError) throw new Error('QR зураг хуулахад алдаа гарлаа: ' + qrUploadError.message);
+          if (qrUploadError) {
+            console.error(`Upload error for QR ${qr.id}:`, qrUploadError);
+            throw new Error('QR зураг хуулахад алдаа гарлаа: ' + qrUploadError.message);
+          }
 
           const { data: { publicUrl } } = supabase.storage
             .from('qrcodes')
             .getPublicUrl(qrFileName);
 
-          await fetch(`/api/qr-codes/${qr.id}`, {
+          console.log(`Updating DB for QR ${qr.id} with URL: ${publicUrl}`);
+
+          const updateResponse = await fetch(`/api/qr-codes/${qr.id}`, {
             method: 'PATCH',
             headers: { 
               'Content-Type': 'application/json',
@@ -432,6 +460,12 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
               target_url: targetUrl
             })
           });
+
+          if (!updateResponse.ok) {
+            const updateErr = await updateResponse.json();
+            console.error(`DB update failed for QR ${qr.id}:`, updateErr);
+            throw new Error(`Мэдээлэл шинэчлэхэд алдаа гарлаа: ${updateErr.error}`);
+          }
 
           setBulkProgress(Math.round(((i + 1) / qrCodes.length) * 100));
         }
@@ -681,6 +715,8 @@ export const QRGenerator: React.FC<QRGeneratorProps> = ({ user, onBack, onSaved 
 
   return (
     <div className="max-w-6xl mx-auto">
+      {/* Hidden container for bulk QR generation */}
+      <div ref={bulkQrRef} className="hidden" aria-hidden="true" />
       <style>{`
         .qr-preview-box canvas, .qr-preview-box svg {
           max-width: 100% !important;
