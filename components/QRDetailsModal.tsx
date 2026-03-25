@@ -54,12 +54,29 @@ export const QRDetailsModal: React.FC<QRDetailsModalProps> = ({ qr, onClose }) =
 
         const response = await fetch(`/api/qr-codes/${qr.id}/analytics`, {
           headers: {
-            'Authorization': `Bearer ${token}`
+            'Authorization': `Bearer ${token}`,
+            'Accept': 'application/json'
           },
           signal: controller.signal
         });
         clearTimeout(timeoutId);
-        if (!response.ok) throw new Error('Failed to fetch analytics');
+        
+        const contentType = response.headers.get('content-type');
+        if (!response.ok) {
+          let errorMsg = 'Failed to fetch analytics';
+          if (contentType && contentType.includes('application/json')) {
+            const errorData = await response.json();
+            errorMsg = errorData.error || errorMsg;
+          }
+          throw new Error(errorMsg);
+        }
+
+        if (!contentType || !contentType.includes('application/json')) {
+          const text = await response.text();
+          console.error('Server returned non-JSON response:', text.substring(0, 200));
+          throw new Error(`Server returned non-JSON response: ${contentType || 'unknown'}. This usually means a routing error.`);
+        }
+
         const data = await response.json();
         setAnalytics(data);
       } catch (err: any) {

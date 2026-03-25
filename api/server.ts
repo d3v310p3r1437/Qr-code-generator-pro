@@ -635,6 +635,7 @@ apiRouter.get('/qr-codes/:id/analytics', requireAuth, async (req, res) => {
   const admin = getSupabaseAdmin();
   if (!admin) return res.status(500).json({ error: 'Supabase Admin client not configured' });
   const { id } = req.params;
+  console.log(`[API] Fetching analytics for QR code: ${id}`);
   try {
     const { data, error } = await admin
       .from('scan_logs')
@@ -643,6 +644,7 @@ apiRouter.get('/qr-codes/:id/analytics', requireAuth, async (req, res) => {
       .order('scanned_at', { ascending: true });
     
     if (error) {
+      console.error(`[API] Analytics error for QR ${id}:`, error);
       // If table doesn't exist yet, return empty array instead of erroring
       // 42P01 is the standard Postgres error for "relation does not exist"
       if (error.code === '42P01' || error.code === 'PGRST116' || error.message.includes('relation "scan_logs" does not exist')) {
